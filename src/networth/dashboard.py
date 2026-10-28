@@ -151,20 +151,28 @@ def period_flows(df: pd.DataFrame, freq: str = "M") -> pd.DataFrame:
     return flows
 
 
-def savings_rates(df: pd.DataFrame, income: pd.Series | None, freq: str = "M") -> pd.Series:
-    """Savings / net salary per period (empty without income data).
+def period_salaries(df: pd.DataFrame, income: pd.Series, freq: str = "M") -> pd.Series:
+    """Net salary per period, counting only months fully covered by snapshots (after the first snapshot's month)."""
+    first, last = df[DATE_COLUMN].iloc[0].to_period("M"), df[DATE_COLUMN].iloc[-1].to_period("M")
+    income = income[(income.index > first) & (income.index <= last)]
+    return income.groupby(income.index.asfreq(freq)).sum()
 
-    Only salaries of months fully covered by snapshots count, i.e. after the first snapshot's month.
-    """
+
+def savings_rates(df: pd.DataFrame, income: pd.Series | None, freq: str = "M") -> pd.Series:
+    """Savings / net salary per period (empty without income data), salaries as in ``period_salaries``."""
     if income is None:
         return pd.Series(dtype=float)
     flows = period_flows(df, freq)
-    first, last = df[DATE_COLUMN].iloc[0].to_period("M"), df[DATE_COLUMN].iloc[-1].to_period("M")
-    income = income[(income.index > first) & (income.index <= last)]
-    income = income.groupby(income.index.asfreq(freq)).sum()
-    common = flows.index.intersection(income.index)
-    common = common[income.loc[common].to_numpy() > 0]
-    return flows.loc[common, "Sparen"] / income.loc[common]
+    salaries = period_salaries(df, income, freq)
+    common = flows.index.intersection(salaries.index)
+    common = common[salaries.loc[common].to_numpy() > 0]
+    return flows.loc[common, "Sparen"] / salaries.loc[common]
+
+
+def salary_between(income: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> float:
+    """Net salary of the months after ``start``'s month up to and including ``end``'s month."""
+    months = pd.period_range(start, end, freq="M")[1:]
+    return float(income.reindex(months).sum())
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +212,7 @@ class Summary:
     year_start: pd.Timestamp  # snapshot closest to one year before ``date``
     year_months: float  # length of the "last year" window in months (shorter if there is less data)
     savings_rate_year: float | None
+    salary_year: float | None  # net salary in the same window (None without income data)
     depot_value: float  # market value before capital gains tax
     depot_paid_in: float
     depot_tax: float  # accrued capital gains tax (KESt, <= 0)
@@ -238,10 +247,9 @@ def summarize(df: pd.DataFrame, income: pd.Series | None = None,
     market_year = float(last[MARKET_GAIN] - year_ago[MARKET_GAIN])
     year_months = (last[DATE_COLUMN] - year_ago[DATE_COLUMN]).days / (365.25 / 12)
 
-    rate = None
+    rate = salary = None
     if income is not None:
-        months = pd.period_range(year_ago[DATE_COLUMN], last[DATE_COLUMN], freq="M")[1:]
-        salary = income.reindex(months).sum()
+        salary = salary_between(income, year_ago[DATE_COLUMN], last[DATE_COLUMN])
         rate = (change_year - market_year) / salary if salary > 0 else None
 
     summary = Summary(
@@ -254,6 +262,7 @@ def summarize(df: pd.DataFrame, income: pd.Series | None = None,
         year_start=year_ago[DATE_COLUMN],
         year_months=year_months,
         savings_rate_year=rate,
+        salary_year=salary,
         depot_value=float(last[DEPOT_VALUE]),
         depot_paid_in=float(last[DEPOT_PAID_IN]),
         depot_tax=float(last[TAX]),
@@ -842,11 +851,7 @@ def _escape(text: str) -> str:
 
 def build_dashboard(data: Data, summary: Summary, income: pd.Series | None = None,
                     show_distribution: bool = True, plotly_src: str | None = None, nav: str = "") -> str:
-    """Render the complete dashboard as one HTML page.
-
-    ``plotly_src``: URL of plotly.js; ``None`` inlines it, so the page works offline as a single file.
-    ``nav``: HTML for the navigation links in the toolbar.
-    """
+    """Render the complete dashboard as one HTML page (``plotly_src`` and ``nav`` as in ``page_html``)."""
     themed = {name: create_figures(data, summary, income, theme) for name, theme in THEMES.items()}
     chart_ids = [chart_id for chart_id in themed["light"] if show_distribution or chart_id != "distribution"]
     figures = {chart_id: {name: themed[name][chart_id] for name in THEMES} for chart_id in chart_ids}
@@ -884,13 +889,26 @@ def build_dashboard(data: Data, summary: Summary, income: pd.Series | None = Non
               "Salden (z. B. Girokonto) zählen als 0.", "shares"),
     ]
 
+    table = (f'<details><summary>Datentabelle ({len(data.df)} Einträge)</summary>'
+             f'<div class="table-wrap">{_table(data)}</div></details>')
+    return page_html("Net Worth Dashboard", _kpis(data, summary), cards, figures, plotly_src, nav, table)
+
+
+def page_html(title: str, kpis: str, cards: Sequence[str], figures: dict[str, dict[str, go.Figure]],
+              plotly_src: str | None = None, nav: str = "", footer: str = "") -> str:
+    """Dashboard page: key figure tiles, a grid of chart cards and ``footer`` (e.g. a data table).
+
+    ``figures``: {chart id: {theme: figure}}, rendered into the cards' ``chart-<id>`` elements.
+    ``plotly_src``: URL of plotly.js; ``None`` inlines it, so the page works offline as a single file.
+    ``nav``: HTML for the navigation links in the toolbar.
+    """
     plotly = f'<script src="{html.escape(plotly_src)}"></script>' if plotly_src else f"<script>{get_plotlyjs()}</script>"
     return f"""<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Net Worth Dashboard</title>
+<title>{html.escape(title)}</title>
 <script>{THEME_INIT_JS}</script>
 <style>{CSS}</style>
 {plotly}
@@ -900,9 +918,9 @@ def build_dashboard(data: Data, summary: Summary, income: pd.Series | None = Non
 <div class="toolbar">{nav}Darstellung
   {THEME_SWITCH_HTML}
 </div>
-<header>{_kpis(data, summary)}</header>
+<header>{kpis}</header>
 <div class="grid">{"".join(cards)}</div>
-<details><summary>Datentabelle ({len(data.df)} Einträge)</summary><div class="table-wrap">{_table(data)}</div></details>
+{footer}
 </main>
 <script>const FIGURES = {_figures_json(figures)};</script>
 <script>{DASHBOARD_JS}</script>
