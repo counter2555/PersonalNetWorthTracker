@@ -184,17 +184,20 @@ def plot_yearly(yearly: pd.DataFrame, t: Theme = LIGHT) -> go.Figure:
 
 
 def plot_cumulative(monthly: pd.DataFrame, t: Theme = LIGHT) -> go.Figure:
-    """Cumulative salary per calendar year over the months; the current year is drawn on top in the ink color."""
+    """Cumulative salary per calendar year over the months.
+
+    The current year is drawn in the ink color, every earlier year in its own hue, since the lines lie close together.
+    """
     years = sorted(set(monthly.index.year))[-RECENT_YEARS:]
-    base = t.group_palette[0]
+    past = [t.group_palette[i] for i in (2, 3, 4, 1)]  # blue, orange, purple, amber
     fig = go.Figure()
-    for age, year in enumerate(reversed(years)):  # newest first, so it gets the strongest color
+    for age, year in enumerate(reversed(years)):  # newest first, so it leads the legend
         values = monthly.loc[monthly.index.year == year, "Gesamt"]
         months = [MONTHS_DE[p.month - 1] for p in values.index]
         newest = age == 0
-        color = t.ink if newest else t.tint(base, t.tint_step(age - 1))
+        color = t.ink if newest else past[(age - 1) % len(past)]
         fig.add_trace(go.Scatter(x=months, y=values.cumsum(), name=str(year), mode="lines+markers" if newest else "lines",
-                                 line=dict(width=2.5 if newest else 1.5, color=color), marker=dict(size=5),
+                                 line=dict(width=3 if newest else 2, color=color), marker=dict(size=6),
                                  hovertemplate=f"{year}: %{{y:,.0f}} €<extra></extra>"))
     _style(fig, t, legend=dict(traceorder="normal", **LEGEND_BELOW))
     fig.update_layout(hovermode="x unified")
