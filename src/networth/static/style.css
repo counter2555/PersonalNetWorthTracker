@@ -46,6 +46,10 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.danger { color: #d03b3b; }
 button.small { padding: 2px 8px; font-size: 13px; }
 form.inline { display: inline; margin: 0; }
+.button.disabled { color: var(--ink-muted); cursor: default; }
+.pager { margin-bottom: 12px; }
+.pager .button { padding: 4px 12px; }
+.pager-info { color: var(--ink-secondary); font-size: 14px; padding: 0 4px; font-variant-numeric: tabular-nums; }
 
 /* tables */
 .table-wrap { overflow: auto; max-height: calc(100vh - 160px); border: 1px solid var(--border); border-radius: 12px;

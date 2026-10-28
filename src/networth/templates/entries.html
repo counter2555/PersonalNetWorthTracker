@@ -3,11 +3,30 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <div class="actions" style="margin-bottom: 12px">
-  <h1 style="margin: 0 auto 0 0">Einträge ({{ rows | length }})</h1>
+  <h1 style="margin: 0 auto 0 0">Einträge ({{ total }})</h1>
   <a class="button" href="{{ root }}/entries/new">+ Neuer Eintrag</a>
   <a class="button" href="{{ root }}/export.xlsx">Excel ⬇</a>
 </div>
+{% macro pager() %}
+<div class="pager actions">
+  {% set url = root ~ "/entries?per=" ~ per ~ "&page=" %}
+  {% if page_no > 1 %}
+    <a class="button" href="{{ url }}1" title="Neueste Einträge">«</a>
+    <a class="button" href="{{ url }}{{ page_no - 1 }}" rel="prev">‹ Neuer</a>
+  {% else %}
+    <span class="button disabled">«</span><span class="button disabled">‹ Neuer</span>
+  {% endif %}
+  <span class="pager-info">{{ first }}–{{ first + rows | length - 1 }} von {{ total }} · Seite {{ page_no }} von {{ pages }}</span>
+  {% if page_no < pages %}
+    <a class="button" href="{{ url }}{{ page_no + 1 }}" rel="next">Älter ›</a>
+    <a class="button" href="{{ url }}{{ pages }}" title="Älteste Einträge">»</a>
+  {% else %}
+    <span class="button disabled">Älter ›</span><span class="button disabled">»</span>
+  {% endif %}
+</div>
+{% endmacro %}
 {% if rows %}
+{% if pages > 1 %}{{ pager() }}{% endif %}
 <div class="table-wrap">
 <table>
   <thead><tr>
@@ -27,6 +46,18 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
+<div class="actions" style="margin-top: 12px">
+  {% if pages > 1 %}{{ pager() }}{% endif %}
+  <form method="get" action="{{ root }}/entries" class="actions" style="margin-left: auto">
+    <label class="check">Pro Seite
+      <select name="per" onchange="this.form.submit()" style="width: auto">
+        {% for size in page_sizes %}<option value="{{ size }}"{% if size == per %} selected{% endif %}>{{ size }}</option>{% endfor %}
+        <option value="0"{% if per == 0 %} selected{% endif %}>Alle</option>
+      </select>
+    </label>
+    <noscript><button type="submit" class="small">OK</button></noscript>
+  </form>
 </div>
 <p class="hint">Grau = berechnet (Formel), kursiv = Festwert aus dem Import statt Formel. Klick auf eine Zeile zum Bearbeiten.</p>
 {% else %}
