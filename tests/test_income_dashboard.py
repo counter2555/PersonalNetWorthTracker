@@ -8,15 +8,6 @@ def salaries(start: str, amounts: list[float]) -> pd.Series:
     return pd.Series(amounts, index=pd.period_range(start, periods=len(amounts), freq="M"), dtype=float)
 
 
-def test_special_payments_are_split_off():
-    # 14 salaries: June and November double
-    income = salaries("2024-01", [2000, 2000, 2000, 2000, 2000, 4000, 2000, 2000, 2000, 2000, 4000, 2000])
-    monthly = monthly_income(income)
-    assert monthly["Sonderzahlungen"].sum() == 4000
-    assert monthly.loc[pd.Period("2024-06", "M"), "Gehalt"] == 2000
-    assert (monthly["Gehalt"] + monthly["Sonderzahlungen"] == monthly["Gesamt"]).all()
-
-
 def test_missing_months_count_as_zero():
     income = salaries("2024-01", [2000, 2000]).drop(pd.Period("2024-02", "M"))
     income[pd.Period("2024-04", "M")] = 2000
@@ -38,6 +29,5 @@ def test_summary():
     summary = summarize_income(monthly, yearly_income(monthly))
     assert summary.window_total == 12 * 2200 and summary.monthly_average == 2200
     assert summary.previous_total is None  # only 22 months of data
-    assert summary.regular == 2200
     assert summary.year == 2024 and summary.year_total == 2200 * 12
     assert summary.year_change is None  # 2023 starts in March, so January and February are missing

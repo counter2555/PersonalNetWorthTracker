@@ -2,8 +2,8 @@
 
 Builds one HTML page answering:
 
-* What do I earn?              net salary of the last 12 months, regular salary, current year vs. last year
-* How does my salary develop?  salary per month and per calendar year, split into regular salary and special payments
+* What do I earn?              net salary of the last 12 months, monthly average, current year vs. last year
+* How does my salary develop?  salary per month and per calendar year
 * Am I ahead this year?        cumulative salary per year, month by month
 * Where does it go?            salary per year split into saved and spent (needs net worth entries)
 
@@ -22,7 +22,6 @@ from .dashboard import (LEGEND_BELOW, LIGHT, MONTHS_DE, THEMES, Data, Summary, T
                         _percent, _range_buttons, _signed_euros, _style, page_html, period_flows, period_salaries,
                         prepare_data, summarize)
 
-SPECIAL_FACTOR = 1.3  # a month above 1.3 × the regular salary contains a special payment (13th/14th salary, bonus)
 RECENT_YEARS = 5  # years shown in the cumulative chart
 
 
@@ -31,17 +30,9 @@ RECENT_YEARS = 5  # years shown in the cumulative chart
 # ---------------------------------------------------------------------------
 
 def monthly_income(income: pd.Series) -> pd.DataFrame:
-    """Salary per month from the first to the last month with income (missing months count as 0).
-
-    "Gehalt" is the regular salary, "Sonderzahlungen" whatever a month brings above the regular level, if it
-    exceeds it by ``SPECIAL_FACTOR``. The regular level is the median of the months with income in the
-    trailing 12 months, so a few special payments a year don't move it.
-    """
+    """Salary per month from the first to the last month with income (missing months count as 0)."""
     months = pd.period_range(income.index.min(), income.index.max(), freq="M")
-    total = income.reindex(months, fill_value=0.0).astype(float)
-    level = total.where(total > 0).rolling(12, min_periods=1).median().fillna(0)
-    special = (total - level).where(total > level * SPECIAL_FACTOR, 0.0)
-    return pd.DataFrame({"Gesamt": total, "Gehalt": total - special, "Sonderzahlungen": special, "Niveau": level})
+    return pd.DataFrame({"Gesamt": income.reindex(months, fill_value=0.0).astype(float)})
 
 
 def yearly_income(monthly: pd.DataFrame) -> pd.DataFrame:
@@ -51,7 +42,7 @@ def yearly_income(monthly: pd.DataFrame) -> pd.DataFrame:
     is compared with the matching months of the year before; ``NaN`` if those aren't all covered.
     """
     years = monthly.groupby(monthly.index.year)
-    table = years[["Gesamt", "Gehalt", "Sonderzahlungen"]].sum()
+    table = years[["Gesamt"]].sum()
     table["Monate"] = years.size()
     table["Erster Monat"] = years.apply(lambda g: g.index.min().month)
     table["Letzter Monat"] = years.apply(lambda g: g.index.max().month)
@@ -91,7 +82,6 @@ class IncomeSummary:
     window_months: int  # months in that window (fewer if there is less data)
     window_total: float
     previous_total: float | None  # the 12 months before, if fully covered
-    regular: float  # regular monthly salary in the last month
     year: int
     year_total: float  # current calendar year up to the last month
     year_change: float | None  # against the same months of the year before
@@ -119,7 +109,6 @@ def summarize_income(monthly: pd.DataFrame, yearly: pd.DataFrame, savings: Summa
         window_months=len(window),
         window_total=float(window.sum()),
         previous_total=float(previous.sum()) if len(previous) == 12 else None,
-        regular=float(monthly["Niveau"].iloc[-1]),
         year=last.year,
         year_total=float(yearly.loc[last.year, "Gesamt"]),
         year_change=None if pd.isna(change) else float(change),
@@ -155,27 +144,18 @@ def _change_text(change: float | None, compared: str) -> str:
 # Figures
 # ---------------------------------------------------------------------------
 
-def _salary_colors(t: Theme) -> tuple[str, str]:
-    """Regular salary and special payments: one hue, the special payments lighter (light) or darker (dark)."""
-    base = t.group_palette[0]
-    return base, t.tint(base, 0.5)
-
-
 def plot_monthly(monthly: pd.DataFrame, t: Theme = LIGHT) -> go.Figure:
-    """Salary per month as stacked bars (regular + special payments), the 12-month average as a line."""
+    """Salary per month as bars, the 12-month average as a line."""
     x = monthly.index.to_timestamp()
-    regular, special = _salary_colors(t)
     average = monthly["Gesamt"].rolling(12).mean()
     fig = go.Figure([
-        go.Bar(x=x, y=monthly["Gehalt"], name="Laufendes Gehalt", marker_color=regular,
-               hovertemplate="Gehalt: %{y:,.0f} €<extra></extra>"),
-        go.Bar(x=x, y=monthly["Sonderzahlungen"], name="Sonderzahlungen", marker_color=special,
-               hovertemplate="Sonderzahlung: %{y:,.0f} €<extra></extra>"),
+        go.Bar(x=x, y=monthly["Gesamt"], name="Nettogehalt", marker_color=t.group_palette[0],
+               hovertemplate="Nettogehalt: %{y:,.0f} €<extra></extra>"),
         go.Scatter(x=x, y=average, name="Ø 12 Monate", mode="lines", line=dict(width=2, color=t.ink),
                    hovertemplate="<b>Ø 12 Monate: %{y:,.0f} €</b><extra></extra>"),
     ])
     _style(fig, t, legend=dict(traceorder="normal"))
-    fig.update_layout(barmode="stack", bargap=0.25, hovermode="x unified")
+    fig.update_layout(bargap=0.25, hovermode="x unified")
     fig.update_xaxes(hoverformat="%B %Y", dtick="M3" if len(monthly) > 12 else "M1", tickformat="%b %Y")
     if len(monthly) > 24:  # show the last two years, older months are reachable via "Alle" / panning
         fig.update_xaxes(range=[x[-24] - pd.Timedelta(days=16), x[-1] + pd.Timedelta(days=16)])
@@ -186,13 +166,8 @@ def plot_monthly(monthly: pd.DataFrame, t: Theme = LIGHT) -> go.Figure:
 def plot_yearly(yearly: pd.DataFrame, t: Theme = LIGHT) -> go.Figure:
     """Salary per calendar year with the total and the change against the previous year on top."""
     labels = [_year_label(yearly, year) for year in yearly.index]
-    regular, special = _salary_colors(t)
-    fig = go.Figure([
-        go.Bar(x=labels, y=yearly["Gehalt"], name="Laufendes Gehalt", marker_color=regular, width=0.55,
-               hovertemplate="Gehalt: %{y:,.0f} €<extra></extra>"),
-        go.Bar(x=labels, y=yearly["Sonderzahlungen"], name="Sonderzahlungen", marker_color=special, width=0.55,
-               hovertemplate="Sonderzahlungen: %{y:,.0f} €<extra></extra>"),
-    ])
+    fig = go.Figure(go.Bar(x=labels, y=yearly["Gesamt"], name="Nettogehalt", marker_color=t.group_palette[0],
+                           width=0.55, hovertemplate="Nettogehalt: %{y:,.0f} €<extra></extra>"))
     for i, (year, row) in enumerate(yearly.iterrows()):
         text = f"<b>{_euro(row['Gesamt'])}</b>"
         if not pd.isna(row["Veränderung"]):
@@ -200,8 +175,8 @@ def plot_yearly(yearly: pd.DataFrame, t: Theme = LIGHT) -> go.Figure:
         # x as category index: a label like "2024" would be read as position 2024 on the category axis
         fig.add_annotation(x=i, y=row["Gesamt"], text=text, showarrow=False, yanchor="bottom", yshift=4,
                            font=dict(color=t.ink))
-    _style(fig, t, legend=dict(traceorder="normal", **LEGEND_BELOW))
-    fig.update_layout(barmode="stack", hovermode="x unified")
+    _style(fig, t)
+    fig.update_layout(showlegend=False, hovermode="x unified")
     fig.update_xaxes(type="category", range=[-0.5, len(labels) - 0.5], tickfont=dict(color=t.ink_secondary))
     high = float(yearly["Gesamt"].max()) if len(yearly) else 1.0
     fig.update_yaxes(range=[0, high * 1.25 or 1])
@@ -273,12 +248,9 @@ def _kpis(summary: IncomeSummary) -> str:
     tiles = [
         _kpi(f"Nettogehalt letzte {months}", _euro(summary.window_total),
              _change_text(summary.window_change, "ggü. den 12 Monaten davor") or window,
-             f"Summe der Einträge auf der Seite „Einkommen“ von {window}, inkl. Sonderzahlungen.", hero=True),
-        _kpi("Ø pro Monat", _euro(summary.monthly_average), "inkl. Sonderzahlungen",
+             f"Summe der Einträge auf der Seite „Einkommen“ von {window}.", hero=True),
+        _kpi("Ø pro Monat", _euro(summary.monthly_average), f"Ø der letzten {months}",
              f"Nettogehalt der letzten {months} ÷ {summary.window_months}."),
-        _kpi("Laufendes Gehalt", f"{_euro(summary.regular)} / Monat", "ohne Sonderzahlungen",
-             f"Median der Monate mit Gehalt in den 12 Monaten bis {_month(summary.last_month)}. Monate über dem "
-             f"{_de(SPECIAL_FACTOR, '.1f')}-Fachen zählen den Rest als Sonderzahlung."),
         _kpi(f"Jahr {summary.year} bis {MONTHS_DE[summary.last_month.month - 1]}", _euro(summary.year_total),
              _change_text(summary.year_change, "ggü. denselben Monaten im Vorjahr") or "kein Vorjahr zum Vergleich",
              "Summe seit Jahresbeginn bis zum letzten Monat mit Gehalt."),
@@ -296,14 +268,14 @@ def _kpis(summary: IncomeSummary) -> str:
 def _table(yearly: pd.DataFrame, spending: pd.DataFrame | None) -> str:
     rows = []
     for year, row in yearly.iloc[::-1].iterrows():
-        cells = [_year_label(yearly, year), _de(row["Gesamt"]), _de(row["Sonderzahlungen"]),
+        cells = [_year_label(yearly, year), _de(row["Gesamt"]),
                  _de(row["Gesamt"] / row["Monate"]),
                  "" if pd.isna(row["Veränderung"]) else _percent(row["Veränderung"], sign=True)]
         if spending is not None:
             saved = spending.loc[year] if year in spending.index else None
             cells += ["", ""] if saved is None else [_de(saved["Gespart"]), _percent(saved["Sparquote"])]
         rows.append("<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in cells) + "</tr>")
-    head = ["Jahr", "Nettogehalt", "davon Sonderzahlungen", "Ø pro Monat", "ggü. Vorjahr"]
+    head = ["Jahr", "Nettogehalt", "Ø pro Monat", "ggü. Vorjahr"]
     if spending is not None:
         head += ["Gespart", "Sparquote"]
     return (f"<table><thead><tr>{''.join(f'<th>{h}</th>' for h in head)}</tr></thead>"
@@ -325,11 +297,9 @@ def build_dashboard(income: pd.Series, data: Data | None = None, savings: Summar
     themed = {name: create_figures(monthly, yearly, spending, theme) for name, theme in THEMES.items()}
     figures = {chart_id: {name: themed[name][chart_id] for name in THEMES} for chart_id in themed["light"]}
 
-    special = (f"Sonderzahlung = was ein Monat über dem laufenden Gehalt liegt, wenn er es um mehr als das "
-               f"{_de(SPECIAL_FACTOR, '.1f')}-Fache übersteigt (13./14. Gehalt, Boni).")
     cards = [
-        _card("Nettogehalt pro Monat", f"Summe der Einträge je Kalendermonat; Monate ohne Eintrag zählen als 0. "
-              f"{special} Die Linie ist der Durchschnitt der letzten 12 Monate.", "income-monthly", wide=True),
+        _card("Nettogehalt pro Monat", "Summe der Einträge je Kalendermonat; Monate ohne Eintrag zählen als 0. "
+              "Die Linie ist der Durchschnitt der letzten 12 Monate.", "income-monthly", wide=True),
         _card("Jahreseinkommen", "Nettogehalt pro Kalenderjahr. Die Veränderung vergleicht dieselben Monate des "
               "Vorjahres, ein laufendes Jahr also nur bis zum aktuellen Monat.", "income-yearly"),
         _card("Jahresverlauf", f"Aufsummiertes Nettogehalt seit Jahresbeginn, Monat für Monat, für die letzten "
