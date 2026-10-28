@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Einkommen · Net Worth{% endblock %}
+{% block content %}
+<h1>Einkommen</h1>
+<div class="card">
+  <h2>Nettogehalt eintragen</h2>
+  <form method="post" action="{{ root }}/income" class="actions">
+    <label>Datum <input type="date" name="date" value="{{ today.isoformat() }}" required></label>
+    <label>Nettogehalt <input class="number" name="amount" inputmode="text" required></label>
+    <button type="submit" class="primary" style="align-self: end">Hinzufügen</button>
+  </form>
+  <p class="hint">Wird für die Sparquote im Dashboard verwendet (Summe pro Monat). Sheet „Income“ im Excel.</p>
+</div>
+{% if items %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Datum</th><th>Nettogehalt</th><th>Jahressumme</th><th></th></tr></thead>
+  <tbody>
+  {% for item in items %}
+    {% set first_of_year = loop.first or items[loop.index0 - 1].date.year != item.date.year %}
+    <tr>
+      <td>{{ item.date | date }}</td>
+      <td>
+        <form method="post" action="{{ root }}/income" class="actions" style="justify-content: flex-end">
+          <input type="hidden" name="id" value="{{ item.id }}">
+          <input type="hidden" name="date" value="{{ item.date.isoformat() }}">
+          <input class="number" name="amount" value="{{ '%.2f' | format(item.amount) | replace('.', ',') }}" style="width: 130px">
+          <button type="submit" class="small">Speichern</button>
+        </form>
+      </td>
+      <td>{% if first_of_year %}{{ years[item.date.year] | value }}{% endif %}</td>
+      <td><form method="post" action="{{ root }}/income/{{ item.id }}/delete" class="inline" onsubmit="return confirm('Löschen?')">
+        <button type="submit" class="small danger">Löschen</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

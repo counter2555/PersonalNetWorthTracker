@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Spalte · Net Worth{% endblock %}
+{% block content %}
+<h1>{{ "Spalte „" ~ col.name ~ "“" if col.id else "Neue Spalte" }}</h1>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" action="{{ root }}/columns/{{ col.id or 'new' }}" class="stack">
+  <div class="card">
+    <div class="fields">
+      <label>Name (Spaltenüberschrift im Excel) <input name="name" value="{{ col.name }}" required></label>
+      <label>Typ
+        {% if col.id %}<input value="{{ KINDS[col.kind] }}" disabled>
+        {% else %}
+        <select name="kind" id="kind">
+          {% for key, label in KINDS.items() %}<option value="{{ key }}" {% if col.kind == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        {% endif %}
+      </label>
+      <label>Format
+        <select name="number_format">
+          {% for key, label in FORMATS.items() %}<option value="{{ key }}" {% if col.number_format == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Spaltenbreite im Excel <input class="number" name="width" value="{{ col.width }}"></label>
+    </div>
+  </div>
+
+  <div class="card" id="formula-card">
+    <h2>Formel</h2>
+    <label><textarea name="formula" spellcheck="false">{{ col.formula }}</textarea></label>
+    <p class="hint">
+      Spalten in geschwungenen Klammern: <code>{Flatex Depot}-{Depot Entwicklung}</code>.
+      Vorheriger Eintrag: <code>{Summe@prev}</code>, erster Eintrag: <code>{Summe@first}</code>.
+      Bereich nach Spaltenreihenfolge: <code>SUM({Girokonto}:{Flatex Geld})</code>.
+      Funktionen: <code>IF</code>, <code>SUM</code>, <code>MIN</code>, <code>MAX</code>, <code>ABS</code>, <code>ROUND</code>;
+      Operatoren <code>+ - * / ^</code> und Vergleiche <code>= &lt;&gt; &lt; &gt; &lt;= &gt;=</code>.
+      Im Excel wird daraus eine normale Formel (z. B. <code>=G5-H5</code>).
+    </p>
+    {% if col.id %}<p class="hint">Neue Formeln gelten für alle Einträge (außer Festwerten aus einem Import).</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Dashboard</h2>
+    <div class="fields">
+      <label>Anlagegruppe (Konto im Vermögens-Chart)
+        <input name="asset_group" value="{{ col.asset_group }}" list="groups" placeholder="keine">
+        <datalist id="groups">{% for g in groups %}<option value="{{ g }}">{% endfor %}</datalist>
+      </label>
+      <label>Rolle
+        <select name="role">
+          <option value="">keine</option>
+          {% for key, label in ROLES.items() %}<option value="{{ key }}" {% if col.role == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Verrechnen mit (z. B. Kreditkarte mit Girokonto)
+        <select name="net_into">
+          <option value="">–</option>
+          {% for c in columns if c.kind != 'text' and c.id != col.id %}<option {% if col.net_into == c.name %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <p class="hint">Konten mit Anlagegruppe werden im Dashboard gestapelt; die Gruppenreihenfolge steht unter „Einstellungen“.
+      Rollen: genau eine Spalte ist die Summe; Depotwert, Depot-Entwicklung und KESt ergeben die Depot-Auswertung.</p>
+  </div>
+
+  <div class="card">
+    <h2>Hervorhebung im Excel</h2>
+    <label><input name="highlight" value="{{ col.highlight }}" placeholder=">25000:red; <15000:yellow"></label>
+    <p class="hint">Bedingte Formatierung: Regeln mit <code>;</code> getrennt, Farben <code>red</code>, <code>yellow</code>, <code>green</code>.</p>
+  </div>
+
+  <div class="actions">
+    <button type="submit" class="primary">Speichern</button>
+    <a class="button" href="{{ root }}/columns">Abbrechen</a>
+  </div>
+</form>
+{% if col.id %}
+<form method="post" action="{{ root }}/columns/{{ col.id }}/delete" style="margin-top: 16px"
+      onsubmit="return confirm('Spalte „{{ col.name }}“ und alle ihre Werte löschen?')">
+  <button type="submit" class="danger">Spalte löschen</button>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const kind = document.getElementById("kind");
+  const card = document.getElementById("formula-card");
+  const current = {{ col.kind | tojson }};
+  function sync() { card.hidden = (kind ? kind.value : current) !== "formula"; }
+  if (kind) kind.addEventListener("change", sync);
+  sync();
+})();
+</script>
+{% endblock %}

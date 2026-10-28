@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Spalten · Net Worth{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="actions" style="margin-bottom: 12px">
+  <h1 style="margin: 0 auto 0 0">Spalten</h1>
+  <a class="button" href="{{ root }}/columns/new">+ Neue Spalte</a>
+</div>
+<p class="hint">Reihenfolge = Spalten im Excel. Die erste Spalte ist immer „{{ DATE_COLUMN }}“.
+  Anlagegruppe und Rolle steuern das Dashboard.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Name</th><th class="text">Typ</th><th class="text">Formel</th><th class="text">Format</th>
+    <th class="text">Anlagegruppe</th><th class="text">Rolle / verrechnet mit</th><th>Reihenfolge</th><th></th></tr></thead>
+  <tbody>
+  {% for col in columns %}
+    <tr>
+      <td><a href="{{ root }}/columns/{{ col.id }}">{{ col.name }}</a></td>
+      <td class="text">{{ KINDS[col.kind] }}</td>
+      <td class="wrap"><code>{{ col.formula }}</code></td>
+      <td class="text">{{ FORMATS[col.number_format] if col.kind != 'text' else '' }}</td>
+      <td class="text">{{ col.asset_group }}</td>
+      <td class="text">{{ ROLES.get(col.role, '') }}{% if col.net_into %}→ {{ col.net_into }}{% endif %}</td>
+      <td>
+        <form method="post" action="{{ root }}/columns/{{ col.id }}/move" class="inline"><input type="hidden" name="offset" value="-1">
+          <button type="submit" class="small" title="nach oben" {% if loop.first %}disabled{% endif %}>↑</button></form>
+        <form method="post" action="{{ root }}/columns/{{ col.id }}/move" class="inline"><input type="hidden" name="offset" value="1">
+          <button type="submit" class="small" title="nach unten" {% if loop.last %}disabled{% endif %}>↓</button></form>
+      </td>
+      <td><a class="button small" href="{{ root }}/columns/{{ col.id }}">Bearbeiten</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

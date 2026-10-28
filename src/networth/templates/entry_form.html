@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ "Neuer Eintrag" if is_new else "Eintrag bearbeiten" }} · Net Worth{% endblock %}
+{% block content %}
+<h1>{{ "Neuer Eintrag" if is_new else "Eintrag vom " ~ (entry.date | date) }}</h1>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" action="{{ root }}/entries/{{ 'new' if is_new else entry.id }}" class="stack">
+  <div class="card">
+    <div class="fields">
+      <label>{{ DATE_COLUMN }} <input type="date" name="date" value="{{ raw.get('date', entry.date.isoformat()) }}" required></label>
+      {% for col in columns if col.kind == 'input' %}
+        {% set key = 'c' ~ col.id %}
+        <label>{{ col.name }}
+          <input class="number" name="{{ key }}" inputmode="text" autocomplete="off"
+                 value="{{ raw[key] if key in raw else (entry.cells.get(col.id) | input) }}">
+        </label>
+      {% endfor %}
+    </div>
+    <p class="hint">Beträge mit Komma oder Punkt; Rechnungen wie <code>6604,12+895,2</code> sind erlaubt und bleiben im Excel als Formel erhalten.
+      {% if is_new %}Vorausgefüllt mit den Werten des letzten Eintrags.{% endif %}</p>
+    {% for col in columns if col.kind == 'text' %}
+      {% set key = 'c' ~ col.id %}
+      <label>{{ col.name }} <input name="{{ key }}" value="{{ raw[key] if key in raw else (entry.cells.get(col.id).text if entry.cells.get(col.id) else '') or '' }}"></label>
+    {% endfor %}
+  </div>
+
+  {% if fixed %}
+  <div class="card">
+    <h2>Festwerte aus dem Import</h2>
+    <p class="hint">Diese Formelspalten haben in diesem Eintrag einen festen Wert, weil er beim Import von der aktuellen Formel abwich.</p>
+    {% for col in fixed %}
+      <label class="check"><input type="checkbox" name="reset{{ col.id }}"> {{ col.name }}: {{ entry.cells[col.id].value | value(col.number_format) }} → Formel <code>{{ col.formula }}</code> verwenden</label>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit" class="primary">Speichern</button>
+    <a class="button" href="{{ root }}/entries">Abbrechen</a>
+  </div>
+</form>
+
+{% if computed %}
+<div class="card" style="margin-top: 16px">
+  <h2>Berechnete Werte</h2>
+  <dl class="computed">
+  {% for col in columns if col.kind == 'formula' %}
+    <dt>{{ col.name }}</dt><dd>{{ computed.values.get(col.name) | value(col.number_format) }}</dd>
+  {% endfor %}
+  </dl>
+</div>
+{% endif %}
+
+{% if not is_new %}
+<form method="post" action="{{ root }}/entries/{{ entry.id }}/delete" onsubmit="return confirm('Eintrag wirklich löschen?')">
+  <button type="submit" class="danger">Eintrag löschen</button>
+</form>
+{% endif %}
+{% endblock %}
