@@ -124,3 +124,24 @@ def test_income_and_settings(client, store):
     client.post("/settings", data={"target": "500000", "group_order": "Konten, Depot"})
     assert store.target() == 500000.0
     assert store.group_order() == ["Konten", "Depot"]
+
+
+def test_income_dashboard(client, store, example_xlsx):
+    login(client)
+    assert "Noch kein Einkommen" in client.get("/income/dashboard").text
+
+    client.post("/income", data={"date": "2024-01-31", "amount": "2.600"})
+    page = client.get("/income/dashboard")  # income without net worth entries: no savings figures
+    assert page.status_code == 200 and "chart-income-monthly" in page.text
+    assert "chart-income-spending" not in page.text
+
+    with example_xlsx.open("rb") as f:
+        client.post("/import", data={"confirm": "yes"}, files={"file": ("x.xlsx", f, "application/octet-stream")})
+    page = client.get("/income/dashboard")
+    assert page.status_code == 200
+    assert all(f"chart-income-{name}" in page.text for name in ("monthly", "yearly", "cumulative", "spending"))
+    assert "Sparquote" in page.text and 'class=active>Einkommens-Dashboard' in page.text
+
+    download = client.get("/income-dashboard.html")
+    assert "attachment" in download.headers["content-disposition"]
+    assert len(download.content) > 3_000_000  # plotly.js inlined

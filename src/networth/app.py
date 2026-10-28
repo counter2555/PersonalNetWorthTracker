@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from plotly.offline import get_plotlyjs
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import dashboard
+from . import dashboard, income_dashboard
 from . import formula as fx
 from .auth import check_credentials, ensure_configured, is_authenticated
 from .columns import DATE_COLUMN, FORMATS, KINDS, ROLES, Column, Layout
@@ -28,7 +28,7 @@ from .sheet import compute, to_frame
 HERE = Path(__file__).parent
 PUBLIC_PATHS = {"/login", "/healthz", "/static/style.css"}
 
-NAV = [("/", "Dashboard"), ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
+NAV = [("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
        ("/columns", "Spalten"), ("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]
 
 
@@ -150,27 +150,45 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
 
     # -- dashboard ----------------------------------------------------------
 
-    def render_dashboard(request: Request, standalone: bool) -> str | None:
-        key = "standalone" if standalone else f"page:{_root(request)}"
+    def cached(request: Request, name: str, standalone: bool, build) -> str | None:
+        """Dashboard HTML from ``build(plotly_src, nav)``, cached until the data changes."""
+        root = _root(request)
+        key = f"{name}:standalone" if standalone else f"{name}:page:{root}"
         revision = store.revision()
         with cache_lock:
             if key in cache and cache[key][0] == revision:
                 return cache[key][1]
-        columns, entries, rows = sheet()
-        if not rows:
-            return None
-        settings = store.settings()
-        layout = Layout.from_columns(columns, store.group_order())
-        income = dashboard.load_income([(i.date, i.amount) for i in store.income()])
-        root = _root(request)
-        nav = "" if standalone else _nav_html(root, "/", logout=not config.auth_disabled)
+        nav = "" if standalone else _nav_html(root, request.url.path.removeprefix(root),
+                                              logout=not config.auth_disabled)
         plotly_src = None if standalone else f"{root}/assets/plotly.min.js?v={plotly.__version__}"
-        content = dashboard.render(to_frame(columns, rows), layout, income, float(settings["target"]),
-                                   show_distribution=settings.get("show_distribution", "1") == "1",
-                                   plotly_src=plotly_src, nav=nav)
+        content = build(plotly_src, nav)
         with cache_lock:
             cache[key] = (revision, content)
         return content
+
+    def render_dashboard(request: Request, standalone: bool) -> str | None:
+        def build(plotly_src: str | None, nav: str) -> str | None:
+            columns, entries, rows = sheet()
+            if not rows:
+                return None
+            settings = store.settings()
+            layout = Layout.from_columns(columns, store.group_order())
+            income = dashboard.load_income([(i.date, i.amount) for i in store.income()])
+            return dashboard.render(to_frame(columns, rows), layout, income, float(settings["target"]),
+                                    show_distribution=settings.get("show_distribution", "1") == "1",
+                                    plotly_src=plotly_src, nav=nav)
+        return cached(request, "networth", standalone, build)
+
+    def render_income_dashboard(request: Request, standalone: bool) -> str | None:
+        def build(plotly_src: str | None, nav: str) -> str | None:
+            income = dashboard.load_income([(i.date, i.amount) for i in store.income()])
+            if income is None:
+                return None
+            columns, entries, rows = sheet()
+            layout = Layout.from_columns(columns, store.group_order())
+            return income_dashboard.render(income, to_frame(columns, rows) if rows else None, layout,
+                                           plotly_src=plotly_src, nav=nav)
+        return cached(request, "income", standalone, build)
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
@@ -191,6 +209,26 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
         if content is None:
             raise HTTPException(404, "Noch keine Daten")
         return HTMLResponse(content, headers={"Content-Disposition": _attachment("net_worth_dashboard", "html")})
+
+    @app.get("/income/dashboard", response_class=HTMLResponse)
+    def income_dashboard_page(request: Request):
+        try:
+            content = render_income_dashboard(request, standalone=False)
+        except Exception as exc:  # same as the net worth dashboard: never lock the user out of the UI
+            return page(request, "message.html", status_code=500, title="Dashboard-Fehler",
+                        message=f"Das Einkommens-Dashboard konnte nicht erstellt werden: {exc}.")
+        if content is None:
+            return page(request, "message.html", title="Noch kein Einkommen",
+                        message="Trage dein Nettogehalt unter „Einkommen“ ein oder importiere dein Excel "
+                                "(Sheet „Income“) unter „Einstellungen“.")
+        return HTMLResponse(content)
+
+    @app.get("/income-dashboard.html")
+    def income_dashboard_download(request: Request):
+        content = render_income_dashboard(request, standalone=True)
+        if content is None:
+            raise HTTPException(404, "Noch kein Einkommen")
+        return HTMLResponse(content, headers={"Content-Disposition": _attachment("income_dashboard", "html")})
 
     # -- entries ------------------------------------------------------------
 
