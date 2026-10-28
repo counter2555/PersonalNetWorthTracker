@@ -1,0 +1,36 @@
+[project]
+name = "networth"
+version = "0.1.0"
+description = "Self-hosted net worth tracker: data entry, Excel export and an interactive dashboard."
+authors = [{ name = "Benedikt Limbacher" }]
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi (>=0.115,<1.0)",
+    "uvicorn (>=0.30,<1.0)",
+    "jinja2 (>=3.1,<4.0)",
+    "python-multipart (>=0.0.9)",
+    "itsdangerous (>=2.2,<3.0)",
+    "pandas (>=2.2,<3.0)",
+    "numpy (>=1.26)",
+    "plotly (>=5.24,<7.0)",
+    "openpyxl (>=3.1,<4.0)",
+    "xlsxwriter (>=3.2,<4.0)",
+]
+
+[project.scripts]
+networth = "networth.cli:main"
+
+[tool.poetry]
+packages = [{ include = "networth", from = "src" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+httpx = "^0.27"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

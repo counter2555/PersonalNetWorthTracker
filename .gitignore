@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Net worth tracker: never commit personal data ---
+data/
+*.xlsx
+*.xls
+*.sqlite
+*.sqlite-*
+*.db
+secret_key
+poetry.toml
+net_worth_dashboard*.html

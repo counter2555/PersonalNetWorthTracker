@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen · Net Worth{% endblock %}
+{% block content %}
+<h1>Einstellungen</h1>
+<form method="post" action="{{ root }}/settings" class="card stack">
+  <h2>Dashboard</h2>
+  <div class="fields">
+    <label>Vermögensziel (€) <input class="number" name="target" value="{{ settings.target | float | round(2) }}"></label>
+    <label>Reihenfolge der Anlagegruppen (unten → oben) <input name="group_order" value="{{ settings.group_order }}"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="show_distribution" {% if settings.show_distribution == '1' %}checked{% endif %}>
+    Diagramm „Wo liegt mein Geld?“ anzeigen</label>
+  <div class="actions"><button type="submit" class="primary">Speichern</button></div>
+</form>
+
+<div class="card">
+  <h2>Export</h2>
+  <div class="actions">
+    <a class="button" href="{{ root }}/export.xlsx">Excel herunterladen</a>
+    <a class="button" href="{{ root }}/dashboard.html">Dashboard als HTML-Datei</a>
+  </div>
+  <p class="hint">Das Excel hat dasselbe Format wie die bisherige NetWorth.xlsx (Formeln inklusive). Die HTML-Datei funktioniert offline.</p>
+</div>
+
+<form method="post" action="{{ root }}/import" enctype="multipart/form-data" class="card stack">
+  <h2>Excel importieren</h2>
+  <p class="hint">Liest Sheet „Net Worth“ (und „Income“, falls vorhanden). Spalten werden über die Überschrift zugeordnet,
+    unbekannte Spalten werden neu angelegt. <strong>Alle {{ entry_count }} bestehenden Einträge werden ersetzt.</strong></p>
+  <input type="file" name="file" accept=".xlsx" required>
+  <label class="check"><input type="checkbox" name="confirm" value="yes" required> Bestehende Einträge ersetzen</label>
+  <div class="actions"><button type="submit">Importieren</button></div>
+</form>
+{% endblock %}

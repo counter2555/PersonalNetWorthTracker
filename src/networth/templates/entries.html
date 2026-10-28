@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Einträge · Net Worth{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="actions" style="margin-bottom: 12px">
+  <h1 style="margin: 0 auto 0 0">Einträge ({{ rows | length }})</h1>
+  <a class="button" href="{{ root }}/entries/new">+ Neuer Eintrag</a>
+  <a class="button" href="{{ root }}/export.xlsx">Excel ⬇</a>
+</div>
+{% if rows %}
+<div class="table-wrap">
+<table>
+  <thead><tr>
+    <th>{{ DATE_COLUMN }}</th>
+    {% for col in columns %}<th class="{{ 'text' if col.kind == 'text' }}" title="{{ col.formula }}">{{ col.name }}</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr class="link" onclick="location.href='{{ root }}/entries/{{ row.entry_id }}'">
+      <td><a href="{{ root }}/entries/{{ row.entry_id }}">{{ row.date | date }}</a></td>
+      {% for col in columns %}
+        {% set fixed = col.name in row.overridden %}
+        <td class="{{ 'text' if col.kind == 'text' }} {{ 'formula' if col.kind == 'formula' }} {{ 'fixed' if fixed }}"
+            {% if fixed %}title="Festwert (aus Import) statt Formel"{% endif %}>{{ row.values.get(col.name) | value(col.number_format) }}</td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="hint">Grau = berechnet (Formel), kursiv = Festwert aus dem Import statt Formel. Klick auf eine Zeile zum Bearbeiten.</p>
+{% else %}
+<div class="card"><p>Noch keine Einträge.</p></div>
+{% endif %}
+{% endblock %}
