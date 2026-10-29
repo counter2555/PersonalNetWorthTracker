@@ -171,3 +171,21 @@ def test_entries_pagination(client, store, example_xlsx):
 def test_entries_empty(client):
     login(client)
     assert "Noch keine Einträge" in client.get("/entries").text
+
+
+def test_entry_form_sections_and_field_errors(client, store):
+    login(client)
+    page = client.get("/entries/new").text
+    legends = re.findall(r"<legend>(.*?)</legend>", page)
+    assert legends == ["Konten", "Depot", "Vorsorge", "Anleihen"]
+    order = re.findall(r'<label>(.*?)\s*<input class="number"', page)
+    assert order[:7] == ["Girokonto", "Kreditkarte", "Sparkonto", "Urlaubskonto", "Flatex Geld", "Flatex Depot",
+                         "Depot Entwicklung"]  # credit card after its account, gain after the depot
+
+    columns = {c.name: c.id for c in store.columns()}
+    bad = client.post("/entries/new", data={"date": "2024-01-31", f"c{columns['Girokonto']}": "abc",
+                                            f"c{columns['Sparkonto']}": "1++"})
+    assert bad.status_code == 422 and "Bitte 2 Felder prüfen" in bad.text
+    key = f"c{columns['Girokonto']}"
+    assert f'aria-describedby="err-{key}"' in bad.text and f'id="err-{key}">Keine Zahl' in bad.text
+    assert 'value="abc"' in bad.text  # typed input is kept

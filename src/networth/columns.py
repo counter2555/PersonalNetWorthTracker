@@ -246,6 +246,62 @@ def referencing(columns: list[Column], name: str) -> list[str]:
     return result
 
 
+OTHER_SECTION = "Sonstiges"
+
+
+def form_sections(columns: list[Column]) -> list[tuple[str, list[Column]]]:
+    """Input columns of the entry form grouped by asset group, in column order.
+
+    A column without a group follows the column it belongs to: the account it is booked against (``net_into``),
+    or the depot value for the depot gain. Everything else ends up in "Sonstiges" at the end.
+    """
+    ordered = sorted(columns, key=lambda c: c.position)
+    by_name = {c.name: c for c in ordered}
+    by_role = {c.role: c for c in ordered if c.role}
+
+    def anchor(col: Column) -> Column | None:
+        if col.asset_group:
+            return None
+        if col.net_into:
+            return by_name.get(col.net_into)
+        if col.role == "depot_gain":
+            return by_role.get("depot_value")
+        return None
+
+    def group(col: Column, seen: set[str]) -> str:
+        target = anchor(col)
+        if target is None or target.name in seen:
+            return col.asset_group or OTHER_SECTION
+        return group(target, seen | {col.name})
+
+    inputs = [c for c in ordered if c.kind == "input"]
+    attached: dict[str, list[Column]] = {}
+    roots = []
+    for col in inputs:
+        target = anchor(col)
+        if target is not None and target.kind == "input" and target is not col:
+            attached.setdefault(target.name, []).append(col)
+        else:
+            roots.append(col)
+
+    sections: dict[str, list[Column]] = {}
+
+    def place(col: Column, name: str, seen: set[str]) -> None:
+        sections.setdefault(name, []).append(col)
+        for child in attached.get(col.name, []):
+            if child.name not in seen:
+                place(child, name, seen | {child.name})
+
+    for col in roots:
+        place(col, group(col, set()), {col.name})
+    placed = {c.name for cols in sections.values() for c in cols}
+    for col in inputs:  # attached in a cycle: no root reaches them
+        if col.name not in placed:
+            sections.setdefault(OTHER_SECTION, []).append(col)
+    other = sections.pop(OTHER_SECTION, None)
+    return list(sections.items()) + ([(OTHER_SECTION, other)] if other else [])
+
+
 @dataclass
 class Layout:
     """What the dashboard needs to know about the columns."""

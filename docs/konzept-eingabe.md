@@ -4,6 +4,8 @@ Ziel: Ein neuer Eintrag soll in wenigen Sekunden erledigt sein – vor allem am 
 **Textfelder** (keine Slider, Stepper oder `type=number`-Felder), damit Komma, Minus und Rechnungen wie
 `6604,12+895,2` weiterhin direkt eingetippt werden können.
 
+**Stand:** Umgesetzt sind die Bausteine 1 (Gruppen), 3 (Antippen markiert), 7 (Enter springt weiter) und 8 (Fehler am Feld). Die Bausteine 2, 4, 5 und 6 sind bewusst nicht umgesetzt.
+
 ## Was die Eingabe heute schwer macht
 
 Formular `entries/new` (`templates/entry_form.html`):

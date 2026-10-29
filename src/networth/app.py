@@ -19,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import dashboard, income_dashboard
 from . import formula as fx
 from .auth import check_credentials, ensure_configured, is_authenticated
-from .columns import DATE_COLUMN, FORMATS, KINDS, ROLES, Column, Layout
+from .columns import DATE_COLUMN, FORMATS, KINDS, ROLES, Column, Layout, form_sections
 from .config import Config
 from .db import Cell, Entry, Income, Store
 from .excel import export_workbook, import_workbook
@@ -247,7 +247,7 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
         return page(request, "entries.html", columns=columns, rows=shown, total=len(rows), page_no=page_no,
                     pages=pages, per=per, first=start + 1, page_sizes=PAGE_SIZES)
 
-    def entry_form(request: Request, entry: Entry, columns: list[Column], error: str | None = None,
+    def entry_form(request: Request, entry: Entry, columns: list[Column], errors: dict[str, str] | None = None,
                    raw: dict[str, str] | None = None, status_code: int = 200, is_new: bool = False):
         computed = None
         if entry.id is not None:
@@ -255,7 +255,8 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
             computed = next((r for r in rows if r.entry_id == entry.id), None)
         fixed = [c for c in columns if c.kind == "formula" and c.id in entry.cells and entry.cells[c.id].override]
         return page(request, "entry_form.html", status_code=status_code, entry=entry, columns=columns,
-                    error=error, raw=raw or {}, computed=computed, is_new=is_new, fixed=fixed)
+                    sections=form_sections(columns), errors=errors or {}, raw=raw or {}, computed=computed,
+                    is_new=is_new, fixed=fixed)
 
     @app.get("/entries/new", response_class=HTMLResponse)
     def entry_new(request: Request):
@@ -279,14 +280,14 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
         except ValueError:
             date = None
         cells: dict[int, Cell] = {}
-        errors = [] if date else ["Bitte ein gültiges Datum angeben"]
+        errors = {} if date else {"date": "Bitte ein gültiges Datum angeben"}  # form field -> message
         for col in columns:
             key = f"c{col.id}"
             if col.kind == "input":
                 try:
                     value, expr = fx.parse_number_input(raw.get(key, ""))
                 except fx.FormulaError as exc:
-                    errors.append(f"{col.name}: {exc}")
+                    errors[key] = str(exc)
                     continue
                 if value is not None:
                     cells[col.id] = Cell(value=value, expr=expr)
@@ -299,7 +300,7 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
                     cells[col.id] = existing.cells[col.id]
         entry = Entry(date=date or dt.date.today(), cells=cells, id=entry_id)
         if errors:
-            return entry_form(request, existing or entry, columns, error="; ".join(errors), raw=raw,
+            return entry_form(request, existing or entry, columns, errors=errors, raw=raw,
                               status_code=422, is_new=entry_id is None)
         store.save_entry(entry)
         return redirect(request, "/entries", f"Eintrag vom {format_date(entry.date)} gespeichert")

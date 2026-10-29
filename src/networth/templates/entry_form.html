@@ -2,24 +2,35 @@
 {% block title %}{{ "Neuer Eintrag" if is_new else "Eintrag bearbeiten" }} · Net Worth{% endblock %}
 {% block content %}
 <h1>{{ "Neuer Eintrag" if is_new else "Eintrag vom " ~ (entry.date | date) }}</h1>
-{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
-<form method="post" action="{{ root }}/entries/{{ 'new' if is_new else entry.id }}" class="stack">
+{% if errors %}<div class="flash error">Bitte {{ errors | length }} {{ "Feld" if errors | length == 1 else "Felder" }} prüfen.</div>{% endif %}
+{% macro field_error(key) %}{% if key in errors %}<span class="field-error" id="err-{{ key }}">{{ errors[key] }}</span>{% endif %}{% endmacro %}
+{% macro invalid(key) %}{% if key in errors %} aria-invalid="true" aria-describedby="err-{{ key }}"{% endif %}{% endmacro %}
+<form method="post" action="{{ root }}/entries/{{ 'new' if is_new else entry.id }}" class="stack" id="entry-form">
   <div class="card">
     <div class="fields">
-      <label>{{ DATE_COLUMN }} <input type="date" name="date" value="{{ raw.get('date', entry.date.isoformat()) }}" required></label>
-      {% for col in columns if col.kind == 'input' %}
+      <label>{{ DATE_COLUMN }} <input type="date" name="date" value="{{ raw.get('date', entry.date.isoformat()) }}" required{{ invalid('date') }}>
+        {{ field_error('date') }}</label>
+    </div>
+    {% for section, cols in sections %}
+    <fieldset class="section">
+      <legend>{{ section }}</legend>
+      <div class="fields">
+      {% for col in cols %}
         {% set key = 'c' ~ col.id %}
         <label>{{ col.name }}
-          <input class="number" name="{{ key }}" inputmode="text" autocomplete="off"
-                 value="{{ raw[key] if key in raw else (entry.cells.get(col.id) | input) }}">
+          <input class="number" name="{{ key }}" inputmode="text" autocomplete="off" enterkeyhint="next"
+                 value="{{ raw[key] if key in raw else (entry.cells.get(col.id) | input) }}"{{ invalid(key) }}>
+          {{ field_error(key) }}
         </label>
       {% endfor %}
-    </div>
+      </div>
+    </fieldset>
+    {% endfor %}
     <p class="hint">Beträge mit Komma oder Punkt; Rechnungen wie <code>6604,12+895,2</code> sind erlaubt und bleiben im Excel als Formel erhalten.
       {% if is_new %}Vorausgefüllt mit den Werten des letzten Eintrags.{% endif %}</p>
     {% for col in columns if col.kind == 'text' %}
       {% set key = 'c' ~ col.id %}
-      <label>{{ col.name }} <input name="{{ key }}" value="{{ raw[key] if key in raw else (entry.cells.get(col.id).text if entry.cells.get(col.id) else '') or '' }}"></label>
+      <label>{{ col.name }} <input name="{{ key }}" enterkeyhint="next" value="{{ raw[key] if key in raw else (entry.cells.get(col.id).text if entry.cells.get(col.id) else '') or '' }}"></label>
     {% endfor %}
   </div>
 
@@ -55,4 +66,36 @@
   <button type="submit" class="danger">Eintrag löschen</button>
 </form>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("entry-form");
+  const fields = () => Array.from(form.querySelectorAll("input:not([type=hidden]):not([type=checkbox])"))
+    .filter(el => !el.disabled && el.offsetParent !== null);
+  // tapping an amount selects it, so typing replaces the prefilled value
+  // (on click only once the pointer is released, which would otherwise drop the selection again);
+  // a second tap places the cursor to append e.g. "+250"
+  form.querySelectorAll("input.number").forEach(el => {
+    let tapped = false;
+    const selectAll = () => el.setSelectionRange(0, el.value.length);
+    el.addEventListener("pointerdown", () => { tapped = document.activeElement !== el; });
+    el.addEventListener("focus", () => { if (!tapped) selectAll(); });
+    el.addEventListener("click", () => { if (tapped) selectAll(); tapped = false; });
+  });
+  // Enter moves to the next field; only the last one saves
+  const list = fields();
+  if (list.length) list[list.length - 1].setAttribute("enterkeyhint", "done");
+  form.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || event.isComposing || event.target.tagName !== "INPUT") return;
+    const current = fields(), i = current.indexOf(event.target);
+    if (i < 0 || i === current.length - 1) return;
+    event.preventDefault();
+    current[i + 1].focus();
+  });
+  const invalid = form.querySelector("[aria-invalid=true]");
+  if (invalid) invalid.focus();
+})();
+</script>
 {% endblock %}
