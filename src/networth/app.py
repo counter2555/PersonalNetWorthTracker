@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import plotly
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,6 +27,9 @@ from .sheet import compute, to_frame
 
 HERE = Path(__file__).parent
 PUBLIC_PATHS = {"/login", "/healthz", "/static/style.css"}
+
+PAGE_SIZES = (25, 50, 100)  # entries per page; 0 = all
+DEFAULT_PAGE_SIZE = 50
 
 NAV = [("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
        ("/columns", "Spalten"), ("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]
@@ -233,9 +236,16 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
     # -- entries ------------------------------------------------------------
 
     @app.get("/entries", response_class=HTMLResponse)
-    def entries_list(request: Request):
+    def entries_list(request: Request, page_no: int = Query(1, alias="page"), per: int = DEFAULT_PAGE_SIZE):
         columns, entries, rows = sheet()
-        return page(request, "entries.html", columns=columns, rows=list(reversed(rows)))
+        rows = list(reversed(rows))  # newest first
+        per = per if per in (*PAGE_SIZES, 0) else DEFAULT_PAGE_SIZE
+        pages = max(1, -(-len(rows) // per)) if per else 1
+        page_no = min(max(page_no, 1), pages)
+        start = (page_no - 1) * per if per else 0
+        shown = rows[start:start + per] if per else rows
+        return page(request, "entries.html", columns=columns, rows=shown, total=len(rows), page_no=page_no,
+                    pages=pages, per=per, first=start + 1, page_sizes=PAGE_SIZES)
 
     def entry_form(request: Request, entry: Entry, columns: list[Column], error: str | None = None,
                    raw: dict[str, str] | None = None, status_code: int = 200, is_new: bool = False):

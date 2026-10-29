@@ -145,3 +145,29 @@ def test_income_dashboard(client, store, example_xlsx):
     download = client.get("/income-dashboard.html")
     assert "attachment" in download.headers["content-disposition"]
     assert len(download.content) > 3_000_000  # plotly.js inlined
+
+
+def test_entries_pagination(client, store, example_xlsx):
+    login(client)
+    with example_xlsx.open("rb") as f:
+        client.post("/import", data={"confirm": "yes"}, files={"file": ("x.xlsx", f, "application/octet-stream")})
+    links = lambda text: re.findall(r'href="/entries/(\d+)"', text)  # noqa: E731
+    newest = [str(e.id) for e in reversed(store.entries())]
+
+    first = client.get("/entries")  # 150 entries, 50 per page, newest first
+    assert "Einträge (150)" in first.text and "1–50 von 150 · Seite 1 von 3" in first.text
+    assert links(first.text) == newest[:50]
+    assert 'href="/entries?per=50&amp;page=2"' in first.text
+
+    last = client.get("/entries?page=3")
+    assert links(last.text) == newest[100:] and "101–150 von 150" in last.text
+    assert links(client.get("/entries?page=99").text) == newest[100:]  # out of range: last page
+    assert len(links(client.get("/entries?per=25&page=2").text)) == 25
+    everything = client.get("/entries?per=0")
+    assert len(links(everything.text)) == 150 and "Seite 1 von" not in everything.text
+    assert len(links(client.get("/entries?per=7").text)) == 50  # unsupported size: default
+
+
+def test_entries_empty(client):
+    login(client)
+    assert "Noch keine Einträge" in client.get("/entries").text
