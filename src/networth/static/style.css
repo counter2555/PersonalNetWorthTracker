@@ -38,6 +38,10 @@ input, select, textarea { font: inherit; font-size: 16px; color: var(--ink); bac
 input[type=checkbox] { width: auto; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 input.number { text-align: right; font-variant-numeric: tabular-nums; }
+input[aria-invalid=true] { border-color: #d03b3b; }
+.field-error { color: #d03b3b; font-size: 13px; }
+fieldset.section { border: 0; border-top: 1px solid var(--grid); margin: 16px 0 0; padding: 12px 0 0; min-width: 0; }
+fieldset.section legend { padding: 0 8px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); }
 textarea { min-height: 70px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 14px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 button, .button { font: inherit; border-radius: 8px; padding: 8px 16px; cursor: pointer; border: 1px solid var(--grid);
