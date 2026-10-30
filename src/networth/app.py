@@ -19,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import achievements, dashboard, income_dashboard
 from . import formula as fx
 from .auth import current_user, ensure_configured
-from .columns import DATE_COLUMN, FORMATS, KINDS, ROLES, Column, Layout, form_sections
+from .columns import DATE_COLUMN, FORMATS, KINDS, LAYOUTS, ROLES, Column, Layout, form_sections
 from .config import Config
 from .db import Cell, Entry, Income, Store
 from .excel import export_workbook, import_workbook
@@ -84,7 +84,7 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     app.state.config, app.state.users = config, users
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.filters.update(value=format_value, date=format_date, input=format_input)
-    templates.env.globals.update(NAV=NAV, KINDS=KINDS, FORMATS=FORMATS, ROLES=ROLES, DATE_COLUMN=DATE_COLUMN,
+    templates.env.globals.update(NAV=NAV, LAYOUTS=LAYOUTS, KINDS=KINDS, FORMATS=FORMATS, ROLES=ROLES, DATE_COLUMN=DATE_COLUMN,
                                  auth_enabled=not config.auth_disabled, THEME_CSS=dashboard.THEME_CSS,
                                  THEME_INIT_JS=dashboard.THEME_INIT_JS, THEME_SWITCH_JS=dashboard.THEME_SWITCH_JS,
                                  THEME_SWITCH_HTML=dashboard.THEME_SWITCH_HTML)
@@ -438,6 +438,16 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     @app.get("/columns/new", response_class=HTMLResponse)
     def column_new(request: Request):
         return column_form(request, Column(name=""))
+
+    @app.post("/columns/reset")
+    async def columns_reset(request: Request):
+        form = await request.form()
+        layout = str(form.get("layout", ""))
+        if layout not in LAYOUTS or form.get("confirm") != "yes":
+            return redirect(request, "/columns", "Bitte ein Layout wählen und das Löschen bestätigen", "error")
+        removed = data(request).reset_columns(layout)
+        return redirect(request, "/columns", "Spalten zurückgesetzt"
+                        + (f"; gelöscht: {', '.join(removed)}" if removed else ""))
 
     @app.get("/columns/{column_id}", response_class=HTMLResponse)
     def column_edit(request: Request, column_id: int):

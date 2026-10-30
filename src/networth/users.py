@@ -176,7 +176,7 @@ class Users:
     def store(self, user_id: int) -> Store:
         with self._lock:
             if user_id not in self._stores:
-                self._stores[user_id] = Store(self.store_path(user_id))
+                self._stores[user_id] = Store(self.store_path(user_id), layout="basic")
             return self._stores[user_id]
 
     def bootstrap(self, username: str, password: str = "", password_hash: str = "") -> User | None:
@@ -192,6 +192,8 @@ class Users:
         legacy = self.data_dir / "networth.sqlite"
         if legacy.exists() and not self.store_path(user.id).exists():
             os.replace(legacy, self.store_path(user.id))
+        else:  # the owner of the installation starts with the layout of their NetWorth.xlsx
+            Store(self.store_path(user.id), layout="full")
         return user
 
 

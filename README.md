@@ -95,9 +95,10 @@ Hinter einem Reverse-Proxy mit HTTPS `NWT_SECURE_COOKIES=true` setzen; unter ein
 
 ## Spalten
 
-Die Spalten sind **pro Benutzer** konfigurierbar: jedes Konto startet mit dem Standardlayout und kann es
-unabhängig von anderen anpassen. Die erste Spalte ist immer `Datum`. Das Standardlayout entspricht der bisherigen
-`NetWorth.xlsx`.
+Die Spalten sind **pro Benutzer** konfigurierbar, jedes Konto passt sie unabhängig von anderen an. Die erste Spalte
+ist immer `Datum`. Der erste Administrator startet mit dem Layout der bisherigen `NetWorth.xlsx`, neue Benutzer mit
+einem schlanken Layout (Girokonto, Sparkonto, Kreditkarte, Depot, Summe, Kommentar). Unter *Spalten → Spalten
+zurücksetzen* lässt sich jederzeit eines der beiden Layouts übernehmen; Spalten mit gleichem Namen behalten ihre Werte.
 
 | Typ     | Bedeutung |
 |---------|-----------|

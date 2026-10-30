@@ -81,7 +81,7 @@ def parse_highlight(text: str) -> list[HighlightRule]:
 
 
 # ---------------------------------------------------------------------------
-# Default layout = the original NetWorth.xlsx
+# Default layouts; "full" = the original NetWorth.xlsx
 # ---------------------------------------------------------------------------
 
 def _c(name: str, kind: str = "input", formula: str = "", fmt: str = "currency", width: float = 12.0, **kw) -> Column:
@@ -130,8 +130,31 @@ DEFAULT_COLUMNS = [
 ]
 
 
-def default_columns() -> list[Column]:
-    return [replace(col, position=i) for i, col in enumerate(DEFAULT_COLUMNS, start=1)]
+# Lean layout for new accounts: a few accounts and a depot, the user adds their own
+BASIC_GROUP_ORDER = ["Konten", "Depot"]
+
+BASIC_COLUMNS = [
+    _c("Girokonto", asset_group="Konten"),
+    _c("Sparkonto", asset_group="Konten"),
+    _c("Kreditkarte", net_into="Girokonto"),
+    _c("Depot", asset_group="Depot", role="depot_value"),
+    _c("Depot Entwicklung", width=17.7, role="depot_gain"),
+    _c("Kest", "formula", "IF({Depot Entwicklung}>0,-{Depot Entwicklung}*0.275,0)", role="tax"),
+    _c("Summe", "formula", "SUM({Girokonto}:{Depot})+{Kest}", width=14.0, role="total"),
+    _c("Änderung Gesamt", "formula", "({Summe}-{Summe@prev})/{Summe@prev}", "percent", 16.0),
+    _c("Änderung seit Start (Abs)", "formula", "{Summe}-{Summe@first}", width=23.4),
+    _c("Kommentar", "text", width=30.0, role="comment"),
+]
+
+# name -> (label, columns, group order of the wealth chart)
+LAYOUTS = {
+    "basic": ("Einfach (wenige Konten, Depot, Summe)", BASIC_COLUMNS, BASIC_GROUP_ORDER),
+    "full": ("Vollständig (Layout der ursprünglichen NetWorth.xlsx)", DEFAULT_COLUMNS, DEFAULT_GROUP_ORDER),
+}
+
+
+def default_columns(layout: str = "full") -> list[Column]:
+    return [replace(col, position=i) for i, col in enumerate(LAYOUTS[layout][1], start=1)]
 
 
 # ---------------------------------------------------------------------------

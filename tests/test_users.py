@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from networth.app import create_app
 from networth.auth import ensure_configured
+from networth.columns import default_columns
 from networth.db import Store
 from networth.users import UserError, Users
 
@@ -158,3 +159,32 @@ def test_columns_per_user(app, users, store):
     page = admin.get("/columns").text
     assert "Krypto" not in page and "Hauptkonto" not in page and "Girokonto" in page
     assert "Hauptkonto" in client.get("/columns").text
+
+
+def test_new_users_get_basic_layout(app, users, store):
+    assert "Bundesschatz" in [c.name for c in store.columns()]  # the owner keeps the NetWorth.xlsx layout
+    client, _ = register(app, "kim")
+    names = [c.name for c in users.store(users.by_name("kim").id).columns()]
+    assert names[0] == "Girokonto" and "Summe" in names
+    assert not {"Bausparer", "Bundespensionskasse", "Allianz Vorsorgekasse", "Bundesschatz"} & set(names)
+    assert "Bundesschatz" not in client.get("/entries/new").text
+
+
+def test_reset_columns(app, users, store):
+    client = client_for(app, "tester", "test-password")
+    columns = {c.name: c.id for c in store.columns()}
+    client.post("/entries/new", data={"date": "2024-01-31", f"c{columns['Girokonto']}": "1000",
+                                      f"c{columns['Bundesschatz']}": "500"})
+    assert "bestätigen" in client.post("/columns/reset", data={"layout": "basic"}).text
+
+    response = client.post("/columns/reset", data={"layout": "basic", "confirm": "yes"})
+    assert "Spalten zurückgesetzt" in response.text and "Bundesschatz" in response.text
+    names = [c.name for c in store.columns()]
+    assert "Bundesschatz" not in names and "Depot" in names
+    assert store.group_order() == ["Konten", "Depot"]
+    girokonto = next(c for c in store.columns() if c.name == "Girokonto")
+    assert store.entries()[0].cells[girokonto.id].value == 1000  # same name: value kept
+    assert "chart-wealth" in client.get("/").text
+
+    client.post("/columns/reset", data={"layout": "full", "confirm": "yes"})
+    assert [c.name for c in store.columns()] == [c.name for c in default_columns()]
