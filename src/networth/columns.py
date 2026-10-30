@@ -9,10 +9,13 @@ The first column is always the date ("Datum"); every other column is configured 
 The dashboard needs to know what a column means. ``asset_group`` stacks an account into a group of the wealth
 chart; ``role`` marks the columns with a special meaning (see ``ROLES``); ``net_into`` books a column (e.g. a credit
 card balance) against another account in the dashboard.
+
+Users don't edit these fields directly: they manage accounts, metrics and text fields (:mod:`networth.structure`),
+which derives the columns from them.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from . import formula as fx
 
@@ -43,6 +46,7 @@ class Column:
     highlight: str = ""  # conditional format in the Excel export, e.g. ">25000:red; <15000:yellow"
     position: int = 0
     id: int | None = None
+    spec: str = ""  # what the column is for the user (account, metric, ...), see networth.structure
 
     @property
     def is_number(self) -> bool:
@@ -78,83 +82,6 @@ def parse_highlight(text: str) -> list[HighlightRule]:
             raise ValueError(f"Ungültige Regel {part!r}, Beispiel: >25000:red")
         rules.append(HighlightRule(op, value, style))
     return rules
-
-
-# ---------------------------------------------------------------------------
-# Default layouts; "full" = the original NetWorth.xlsx
-# ---------------------------------------------------------------------------
-
-def _c(name: str, kind: str = "input", formula: str = "", fmt: str = "currency", width: float = 12.0, **kw) -> Column:
-    return Column(name=name, kind=kind, formula=formula, number_format=fmt, width=width, **kw)
-
-
-DEFAULT_GROUP_ORDER = ["Vorsorge", "Anleihen", "Konten", "Depot"]  # bottom to top in the wealth chart
-
-DEFAULT_COLUMNS = [
-    _c("Girokonto", width=11.7, asset_group="Konten"),
-    _c("Sparkonto", width=11.3, asset_group="Konten"),
-    _c("Urlaubskonto", width=13.0, asset_group="Konten"),
-    _c("Kreditkarte", width=14.9, net_into="Girokonto"),
-    _c("Flatex Geld", width=11.1, asset_group="Konten"),
-    _c("Flatex Depot", width=12.3, asset_group="Depot", role="depot_value"),
-    _c("Depot Entwicklung", width=17.7, role="depot_gain"),
-    _c("Depot Einzahlung", "formula", "{Flatex Depot}-{Depot Entwicklung}", width=17.7),
-    _c("Kest", "formula", "IF({Depot Entwicklung}>0,-{Depot Entwicklung}*0.275,0)", width=17.7, role="tax"),
-    _c("Netto Gewinn", "formula", "{Depot Entwicklung}+{Kest}", width=12.0),
-    _c("Bausparer", width=10.1, asset_group="Vorsorge"),
-    _c("Bundespensionskasse", width=20.6, asset_group="Vorsorge"),
-    _c("Allianz Vorsorgekasse", width=20.4, asset_group="Vorsorge"),
-    _c("Bundesschatz", width=13.1, asset_group="Anleihen"),
-    _c("Summe", "formula", "SUM({Girokonto}:{Flatex Depot})+SUM({Bausparer}:{Bundesschatz})+{Kest}", width=17.6,
-       role="total"),
-    _c("Summe Geld", "formula", "SUM({Girokonto}:{Flatex Geld})+{Bundesschatz}", width=12.4,
-       highlight=">25000:red; <15000:red"),
-    _c("Cash Rate", "formula", "{Summe Geld}/{Summe}", "percent", 9.9),
-    _c("Liquides Vermögen", "formula", "{Urlaubskonto}+{Girokonto}+{Sparkonto}+{Flatex Geld}+{Flatex Depot}"
-       "+{Kreditkarte}+{Bundesschatz}+{Kest}", width=18.3),
-    _c("Liquide Rate", "formula", "{Liquides Vermögen}/{Summe}", "percent", 12.0),
-    _c("Anlagevermögen", "formula", "{Flatex Depot}+{Bundesschatz}+{Bundespensionskasse}+{Allianz Vorsorgekasse}"
-       "+{Kest}", width=16.3),
-    _c("Anlage Rate", "formula", "{Anlagevermögen}/{Summe}", "percent", 11.7),
-    _c("Aktien Rate", "formula", "({Flatex Depot}+{Kest})/{Summe}", "percent", 11.7),
-    _c("Depot Gewinn Anteil", "formula", "{Depot Entwicklung}/{Flatex Depot}", "percent", 19.9),
-    _c("Verzinstes Vermögen", "formula", "{Sparkonto}+{Flatex Depot}+{Bausparer}+{Bundespensionskasse}"
-       "+{Bundesschatz}+{Allianz Vorsorgekasse}+{Urlaubskonto}+{Kest}", width=20.1),
-    _c("Verzinster Anteil", "formula", "{Verzinstes Vermögen}/{Summe}", "percent", 16.1,
-       highlight="<0.85:red; <0.9:yellow"),
-    _c("Änderung Anlage", "formula", "({Anlagevermögen}-{Anlagevermögen@prev})/{Summe@prev}", "percent", 16.4),
-    _c("Änderung Gesamt", "formula", "({Summe}-{Summe@prev})/{Summe@prev}", "percent", 17.1),
-    _c("Änderung seit Start", "formula", "({Summe}-{Summe@first})/{Summe@first}", "percent", 18.3),
-    _c("Änderung seit Start (Abs)", "formula", "{Summe}-{Summe@first}", width=23.4),
-    _c("Kommentar", "text", width=30.0, role="comment"),
-]
-
-
-# Lean layout for new accounts: a few accounts and a depot, the user adds their own
-BASIC_GROUP_ORDER = ["Konten", "Depot"]
-
-BASIC_COLUMNS = [
-    _c("Girokonto", asset_group="Konten"),
-    _c("Sparkonto", asset_group="Konten"),
-    _c("Kreditkarte", net_into="Girokonto"),
-    _c("Depot", asset_group="Depot", role="depot_value"),
-    _c("Depot Entwicklung", width=17.7, role="depot_gain"),
-    _c("Kest", "formula", "IF({Depot Entwicklung}>0,-{Depot Entwicklung}*0.275,0)", role="tax"),
-    _c("Summe", "formula", "SUM({Girokonto}:{Depot})+{Kest}", width=14.0, role="total"),
-    _c("Änderung Gesamt", "formula", "({Summe}-{Summe@prev})/{Summe@prev}", "percent", 16.0),
-    _c("Änderung seit Start (Abs)", "formula", "{Summe}-{Summe@first}", width=23.4),
-    _c("Kommentar", "text", width=30.0, role="comment"),
-]
-
-# name -> (label, columns, group order of the wealth chart)
-LAYOUTS = {
-    "basic": ("Einfach (wenige Konten, Depot, Summe)", BASIC_COLUMNS, BASIC_GROUP_ORDER),
-    "full": ("Vollständig (Layout der ursprünglichen NetWorth.xlsx)", DEFAULT_COLUMNS, DEFAULT_GROUP_ORDER),
-}
-
-
-def default_columns(layout: str = "full") -> list[Column]:
-    return [replace(col, position=i) for i, col in enumerate(LAYOUTS[layout][1], start=1)]
 
 
 # ---------------------------------------------------------------------------

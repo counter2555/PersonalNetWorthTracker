@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Textfeld · Net Worth{% endblock %}
+{% block content %}
+<h1>{{ "Textfeld „" ~ col.name ~ "“" if col.id else "Neues Notizfeld" }}</h1>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" action="{{ root }}/columns/{{ col.id or 'new' }}" class="stack">
+  <input type="hidden" name="spec" value="{{ spec }}">
+  <div class="card stack">
+    <label>Name <input name="name" value="{{ col.name }}" required autofocus></label>
+    <p class="hint">{% if spec == 'comment' %}Der Kommentar gehört fest zu jedem Eintrag und erscheint als Anmerkung im Chart.
+      {% else %}Freier Text zu jedem Eintrag, z. B. für Notizen.{% endif %}</p>
+  </div>
+  <details class="card">
+    <summary>Erweitert (Excel)</summary>
+    <div class="fields" style="margin-top: 12px">
+      <label>Spaltenbreite im Excel <input class="number" name="width" value="{{ col.width if col.width else '' }}" placeholder="automatisch"></label>
+    </div>
+  </details>
+  <div class="actions">
+    <button type="submit" class="primary">Speichern</button>
+    <a class="button" href="{{ root }}/columns">Abbrechen</a>
+  </div>
+</form>
+{% if col.id and spec == 'note' %}
+<form method="post" action="{{ root }}/columns/{{ col.id }}/delete" style="margin-top: 16px"
+      onsubmit="return confirm('Notizfeld „{{ col.name }}“ samt Texten löschen?')">
+  <button type="submit" class="danger">Notizfeld löschen</button>
+</form>
+{% endif %}
+{% endblock %}

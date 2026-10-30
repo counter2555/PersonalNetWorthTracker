@@ -6,7 +6,6 @@
   <h2>Dashboard</h2>
   <div class="fields">
     <label>Vermögensziel (€) <input class="number" name="target" value="{{ settings.target | float | round(2) }}"></label>
-    <label>Reihenfolge der Anlagegruppen (unten → oben) <input name="group_order" value="{{ settings.group_order }}"></label>
   </div>
   <label class="check"><input type="checkbox" name="show_distribution" {% if settings.show_distribution == '1' %}checked{% endif %}>
     Diagramm „Wo liegt mein Geld?“ anzeigen</label>

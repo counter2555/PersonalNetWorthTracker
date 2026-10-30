@@ -1,4 +1,5 @@
 import io
+import json
 import re
 
 import openpyxl
@@ -100,30 +101,105 @@ def test_import_export_via_ui(client, store, example_xlsx):
     assert len(download.content) > 3_000_000  # plotly.js inlined
 
 
-def test_column_management(client, store):
+def test_accounts_and_metrics(client, store):
     login(client)
-    response = client.post("/columns/new", data={"name": "Krypto", "kind": "input", "number_format": "currency",
-                                                 "width": "12", "asset_group": "Krypto"})
+    page = client.get("/columns").text
+    assert "Konten &amp; Kennzahlen" in page and "Summe aller Konten" in page
+    assert client.get("/columns/new").status_code == 200
+    assert "Welche Konten?" in client.get("/columns/new?type=metric").text
+
+    # a new account in a new group counts towards the total right away
+    response = client.post("/columns/new", data={"name": "Krypto", "spec": "asset", "group": "__new__",
+                                                 "new_group": "Krypto"})
+    assert "„Krypto“ gespeichert" in response.text
+    by_name = {c.name: c for c in store.columns()}
+    assert "{Krypto}" in by_name["Summe"].formula and store.group_order()[-1] == "Krypto"
+    assert "<legend>Krypto</legend>" in client.get("/entries/new").text
+    assert client.get(f"/columns/{by_name['Krypto'].id}").status_code == 200
+
+    # debts are booked against an account and follow it
+    client.post("/columns/new", data={"name": "Kredit", "spec": "liability", "net_into": "Krypto"})
+    names = [c.name for c in store.columns()]
+    assert names.index("Kredit") == names.index("Krypto") + 1
+    assert "verwendet von: Kredit" in client.post(f"/columns/{by_name['Krypto'].id}/delete").text
+
+    # metrics from the catalog
+    response = client.post("/columns/new", data={"name": "Krypto-Anteil", "spec": "share",
+                                                 "members": ["Krypto", "Kredit"]})
     assert "gespeichert" in response.text
-    response = client.post("/columns/new", data={"name": "Kaputt", "kind": "formula", "formula": "{Gibtsnicht}+1",
-                                                 "number_format": "currency"})
+    share = next(c for c in store.columns() if c.name == "Krypto-Anteil")
+    assert share.formula == "({Krypto}+{Kredit})/{Summe}" and share.number_format == "percent"
+    edit = client.get(f"/columns/{share.id}").text
+    assert 'value="Krypto" checked' in edit
+    response = client.post("/columns/new", data={"name": "Leer", "spec": "sum"})
+    assert response.status_code == 422 and "mindestens ein Konto" in response.text
+    response = client.post("/columns/new", data={"name": "Kaputt", "spec": "custom", "formula": "{Gibtsnicht}+1"})
     assert response.status_code == 422 and "unbekannte Spalte" in response.text
 
-    krypto = next(c for c in store.columns() if c.name == "Krypto")
-    client.post(f"/columns/{krypto.id}/move", data={"offset": "-1"})
-    assert [c.name for c in store.columns()][-2] == "Krypto"
-    assert re.search(r"Krypto", client.get("/entries/new").text)
-    client.post(f"/columns/{krypto.id}/delete")
-    assert "Krypto" not in [c.name for c in store.columns()]
+    # deleting an account drops it from sums and shares
+    client.post(f"/columns/{next(c.id for c in store.columns() if c.name == 'Kredit')}/delete")
+    assert next(c for c in store.columns() if c.name == "Krypto-Anteil").formula == "{Krypto}/{Summe}"
+
+    # moving accounts never changes what the total adds up
+    total = sorted(next(c for c in store.columns() if c.spec == "total").formula.split("+"))
+    sparkonto = next(c for c in store.columns() if c.name == "Sparkonto")
+    client.post(f"/columns/{sparkonto.id}/move", data={"offset": "-1"})
+    names = [c.name for c in store.columns()]
+    assert names.index("Sparkonto") < names.index("Girokonto")
+    assert sorted(next(c for c in store.columns() if c.spec == "total").formula.split("+")) == total
+
+
+def test_drag_and_drop_and_groups(client, store):
+    login(client)
+    ids = {c.name: c.id for c in store.columns()}
+    order = [["Depot", [ids["Flatex Depot"]]], ["Konten", [ids["Sparkonto"], ids["Girokonto"]]],
+             ["Vorsorge", [ids["Bausparer"], ids["Bundesschatz"]]], ["Anleihen", []]]
+    client.post("/columns/order", data={"order": json.dumps(order)})
+    assert store.group_order() == ["Depot", "Konten", "Vorsorge", "Anleihen"]
+    names = [c.name for c in store.columns()]
+    assert names[:4] == ["Flatex Depot", "Depot Entwicklung", "Sparkonto", "Girokonto"]
+    assert next(c for c in store.columns() if c.name == "Bundesschatz").asset_group == "Vorsorge"
+
+    assert "noch Konten" in client.post("/groups/delete", data={"group": "Konten"}).text
+    client.post("/groups/delete", data={"group": "Anleihen"})
+    client.post("/groups/rename", data={"group": "Vorsorge", "name": "Pension"})
+    client.post("/groups/move", data={"group": "Pension", "offset": "-1"})
+    client.post("/groups/new", data={"name": "Immobilien"})
+    assert store.group_order() == ["Depot", "Pension", "Konten", "Immobilien"]
+    assert next(c for c in store.columns() if c.name == "Bausparer").asset_group == "Pension"
+
+
+def test_depot_is_one_account(client, store):
+    login(client)
+    by_name = {c.name: c for c in store.columns()}
+    page = client.get(f"/columns/{by_name['Flatex Depot'].id}").text
+    assert 'value="Depot Entwicklung"' in page and 'value="27,5"' in page
+    assert client.get(f"/columns/{by_name['Depot Entwicklung'].id}", follow_redirects=False).status_code == 303
+
+    client.post(f"/columns/{by_name['Flatex Depot'].id}", data={
+        "name": "Depot", "spec": "depot", "group": "Depot", "gain_name": "Depot Gewinn", "tax_rate": "25"})
+    by_name = {c.name: c for c in store.columns()}
+    assert by_name["Kest"].formula == "IF({Depot Gewinn}>0,-{Depot Gewinn}*0.25,0)"
+    assert by_name["Depot Einzahlung"].formula == "{Depot}-{Depot Gewinn}"
+    response = client.post(f"/columns/{by_name['Depot'].id}", data={"name": "Depot", "spec": "asset",
+                                                                    "group": "Depot"})
+    assert response.status_code == 422 and "bleibt ein Depot" in response.text
+
+    # the depot takes its gain, the tax and the depot metrics along; sums keep working
+    response = client.post(f"/columns/{by_name['Depot'].id}/delete")
+    assert "Depot Gewinn" in response.text and "Netto Gewinn" in response.text
+    names = {c.name for c in store.columns()}
+    assert not {"Depot", "Depot Gewinn", "Kest", "Depot Einzahlung", "Depot Gewinn Anteil"} & names
+    assert "{Kest}" not in next(c for c in store.columns() if c.name == "Summe").formula
+    assert "Depot" not in client.get("/columns/new?type=metric").text.split("Welche Konten?")[0]
 
 
 def test_income_and_settings(client, store):
     login(client)
     client.post("/income", data={"date": "2024-01-31", "amount": "2.600,00"})
     assert store.income()[0].amount == 2600.0
-    client.post("/settings", data={"target": "500000", "group_order": "Konten, Depot"})
+    client.post("/settings", data={"target": "500000"})
     assert store.target() == 500000.0
-    assert store.group_order() == ["Konten", "Depot"]
 
 
 def test_income_dashboard(client, store, example_xlsx):

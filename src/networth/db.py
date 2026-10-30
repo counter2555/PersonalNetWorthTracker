@@ -1,4 +1,5 @@
-"""SQLite storage: column configuration, entries (one per snapshot date), income and settings.
+"""SQLite storage: column configuration (accounts, metrics, text fields), entries (one per snapshot date), income
+and settings.
 
 Values are stored per cell (entry x column), so columns can be added, renamed and removed without schema changes.
 """
@@ -12,8 +13,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterator
 
-from . import formula as fx
-from .columns import LAYOUTS, Column, default_columns, validate
+from .columns import Column
+from .structure import (AUTOMATIC, DEFAULT_TAX_RATE, KIND_OF, LAYOUTS, TOP_ACCOUNTS, blockers, build,
+                        default_columns, migrate, rename, section, spec_of, without)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -28,7 +30,8 @@ CREATE TABLE IF NOT EXISTS columns (
     asset_group TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT '',
     net_into TEXT NOT NULL DEFAULT '',
-    highlight TEXT NOT NULL DEFAULT ''
+    highlight TEXT NOT NULL DEFAULT '',
+    spec TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS entries (id INTEGER PRIMARY KEY, date TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS entries_date ON entries (date);
@@ -45,11 +48,13 @@ CREATE TABLE IF NOT EXISTS income (id INTEGER PRIMARY KEY, date TEXT NOT NULL, a
 """
 
 COLUMN_FIELDS = ["position", "name", "kind", "formula", "number_format", "width", "asset_group", "role", "net_into",
-                 "highlight"]
+                 "highlight", "spec"]
+STRUCTURE_VERSION = "1"  # columns have a spec (accounts, metrics, text fields)
 
 DEFAULT_SETTINGS = {
     "target": "1000000",
     "show_distribution": "1",
+    "tax_rate": f"{DEFAULT_TAX_RATE:.10g}",
 }
 
 
@@ -77,7 +82,7 @@ class Income:
 
 class Store:
     def __init__(self, path: str | Path, layout: str = "full"):
-        """``layout``: column layout (see ``columns.LAYOUTS``) of a new database; an existing one keeps its columns."""
+        """``layout``: column layout (see ``structure.LAYOUTS``) of a new database; an existing one keeps its columns."""
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()  # serialize writes from the thread pool
@@ -88,9 +93,23 @@ class Store:
             con.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('group_order', ?)",
                         (", ".join(LAYOUTS[layout][2]),))
             con.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('revision', '0')")
+            if "spec" not in {r["name"] for r in con.execute("PRAGMA table_info(columns)")}:
+                con.execute("ALTER TABLE columns ADD COLUMN spec TEXT NOT NULL DEFAULT ''")
+            version = con.execute("SELECT value FROM meta WHERE key = 'structure_version'").fetchone()
             if con.execute("SELECT COUNT(*) FROM columns").fetchone()[0] == 0:
-                for col in default_columns(layout):
-                    self._insert_column(con, col)
+                self._write_structure(con, default_columns(layout), LAYOUTS[layout][2])
+            elif version is None:
+                self._migrate(con)
+            con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('structure_version', ?)",
+                        (STRUCTURE_VERSION,))
+
+    def _migrate(self, con: sqlite3.Connection) -> None:
+        """Columns from before accounts and metrics get their spec (see :func:`structure.migrate`)."""
+        rate = float(con.execute("SELECT value FROM meta WHERE key = 'tax_rate'").fetchone()[0])
+        result = migrate(self.columns(con), rate)
+        self._write_structure(con, result.columns, result.groups, result.tax_rate)
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('structure_notes', ?)",
+                    ("\n".join(result.notes),))
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
@@ -129,7 +148,18 @@ class Store:
         return float(self.settings()["target"])
 
     def group_order(self) -> list[str]:
+        """Groups of the accounts: order of the entry form and the Excel, bottom to top in the wealth chart."""
         return [g.strip() for g in self.settings()["group_order"].split(",") if g.strip()]
+
+    def tax_rate(self) -> float:
+        return float(self.settings()["tax_rate"])
+
+    def structure_notes(self) -> list[str]:
+        """Hints from the migration to accounts and metrics, until the user dismisses them."""
+        return [n for n in self.settings().get("structure_notes", "").split("\n") if n]
+
+    def dismiss_structure_notes(self) -> None:
+        self.set_settings({"structure_notes": ""})
 
     # -- columns ------------------------------------------------------------
 
@@ -149,49 +179,140 @@ class Store:
                           [getattr(col, f) for f in COLUMN_FIELDS])
         return int(cur.lastrowid)
 
-    def save_column(self, col: Column) -> Column:
-        """Insert (``col.id is None``) or update a column. Renames are applied to all formulas referencing it."""
+    def _structure(self, con: sqlite3.Connection) -> tuple[list[Column], list[str]]:
+        groups = con.execute("SELECT value FROM meta WHERE key = 'group_order'").fetchone()[0]
+        return self.columns(con), [g.strip() for g in groups.split(",") if g.strip()]
+
+    def _write_structure(self, con: sqlite3.Connection, columns: list[Column], groups: list[str],
+                         tax_rate: float | None = None) -> list[Column]:
+        """Build ``columns`` (see :func:`structure.build`) and store them with the groups. Stored columns missing
+        from the list are deleted with their values. Returns the stored columns."""
+        if tax_rate is None:
+            tax_rate = float(con.execute("SELECT value FROM meta WHERE key = 'tax_rate'").fetchone()[0])
+        columns, groups = build(columns, groups, tax_rate)
+        kept = {c.id for c in columns if c.id is not None}
+        for row in con.execute("SELECT id FROM columns").fetchall():
+            if row["id"] not in kept:
+                con.execute("DELETE FROM columns WHERE id = ?", (row["id"],))
+        con.execute("UPDATE columns SET name = '~' || id")  # free the names (UNIQUE) for renames
+        stored = []
+        for c in columns:
+            if c.id is None:
+                c = replace(c, id=self._insert_column(con, c))
+            else:
+                con.execute(f"UPDATE columns SET {', '.join(f'{f} = ?' for f in COLUMN_FIELDS)} WHERE id = ?",
+                            [*(getattr(c, f) for f in COLUMN_FIELDS), c.id])
+            stored.append(c)
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('group_order', ?)", (", ".join(groups),))
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('tax_rate', ?)", (f"{tax_rate:.10g}",))
+        self._bump(con)
+        return stored
+
+    def save_column(self, col: Column, tax_rate: float | None = None) -> Column:
+        """Insert (``col.id is None``) or update a column. Renames are applied to all formulas referencing it.
+
+        ``tax_rate`` changes the capital gains tax rate in the same step (edited with the depot)."""
         with self.tx() as con:
-            columns = self.columns(con)
+            columns, groups = self._structure(con)
             if col.id is None:
                 col = replace(col, position=max((c.position for c in columns), default=0) + 1)
                 columns.append(col)
             else:
                 old = next(c for c in columns if c.id == col.id)
-                if old.kind != col.kind:
-                    raise ValueError("Der Typ einer bestehenden Spalte kann nicht geändert werden")
+                old_spec, new_spec = spec_of(old), spec_of(col)
+                if KIND_OF[old_spec] != KIND_OF[new_spec]:
+                    raise ValueError("Aus einem Konto wird keine Kennzahl und umgekehrt – bitte neu anlegen")
+                if old_spec == "depot" and new_spec != "depot":
+                    raise ValueError("Ein Depot bleibt ein Depot – zum Entfernen samt Gewinn-Werten löschen")
+                if (old_spec in AUTOMATIC | {"comment"}) != (new_spec in AUTOMATIC | {"comment"}) \
+                        or old_spec in AUTOMATIC and new_spec != old_spec:
+                    raise ValueError(f"Die Art von {old.name!r} kann nicht geändert werden")
                 col = replace(col, position=old.position)
-                columns = [col if c.id == col.id else c for c in columns]
                 if old.name != col.name:
-                    columns = [self._renamed(c, old.name, col.name) if c.id != col.id else c for c in columns]
-            validate(columns)
-            if col.id is None:
-                col = replace(col, id=self._insert_column(con, col))
-            for c in columns:
-                if c.id is not None:
-                    con.execute(f"UPDATE columns SET {', '.join(f'{f} = ?' for f in COLUMN_FIELDS)} WHERE id = ?",
-                                [*(getattr(c, f) for f in COLUMN_FIELDS), c.id])
-            self._bump(con)
-            return col
+                    columns = rename(columns, old.name, col.name)
+                    col = rename([col], old.name, col.name)[0]
+                columns = [col if c.id == col.id else c for c in columns]
+            stored = self._write_structure(con, columns, groups, tax_rate)
+            return next(c for c in stored if c.name == col.name)
 
-    @staticmethod
-    def _renamed(col: Column, old: str, new: str) -> Column:
-        formula = fx.rename(col.formula, old, new) if col.kind == "formula" else col.formula
-        return replace(col, formula=formula, net_into=new if col.net_into == old else col.net_into)
+    def delete_column(self, column_id: int) -> list[str]:
+        """Delete a column with its values; a depot takes its gain, tax and depot metrics along.
 
-    def delete_column(self, column_id: int) -> None:
-        from .columns import referencing
-
+        Returns the names of all deleted columns."""
         with self.tx() as con:
-            columns = self.columns(con)
+            columns, groups = self._structure(con)
             col = next(c for c in columns if c.id == column_id)
-            users = referencing(columns, col.name)
-            rest = [c for c in columns if c.id != column_id]
+            if spec_of(col) in AUTOMATIC | {"comment"}:
+                raise ValueError(f"{col.name!r} gehört fest dazu und kann nicht gelöscht werden")
+            rest = without(columns, col.name)
+            remaining = {c.name for c in rest}
+            deleted = [c.name for c in columns if c.name not in remaining]
+            users = list(dict.fromkeys(n for name in deleted for n in blockers(columns, name) if n in remaining))
             if users:
                 raise ValueError(f"{col.name!r} wird noch verwendet von: {', '.join(users)}")
-            validate(rest)  # e.g. a range {A}:{B} must not lose one of its ends
-            con.execute("DELETE FROM columns WHERE id = ?", (column_id,))
-            self._bump(con)
+            self._write_structure(con, rest, groups)
+            return deleted
+
+    def move_column(self, column_id: int, offset: int) -> None:
+        """Move a column up or down within its section (e.g. among the accounts of its group)."""
+        with self.tx() as con:
+            columns, groups = self._structure(con)
+            col = next(c for c in columns if c.id == column_id)
+            peers = [c for c in columns if section(c) == section(col)]
+            index = peers.index(col)
+            other = peers[min(max(index + offset, 0), len(peers) - 1)]
+            positions = {col.id: other.position, other.id: col.position}
+            self._write_structure(con, [replace(c, position=positions.get(c.id, c.position)) for c in columns],
+                                  groups)
+
+    def order_accounts(self, order: dict[str, list[int]]) -> None:
+        """Groups in this order with these accounts (``group -> account ids``, e.g. after drag and drop)."""
+        with self.tx() as con:
+            columns, groups = self._structure(con)
+            placed = {cid: (group, i) for group, ids in order.items() for i, cid in enumerate(ids)}
+            columns = [replace(c, asset_group=placed[c.id][0], position=placed[c.id][1])
+                       if c.id in placed and spec_of(c) in TOP_ACCOUNTS else c for c in columns]
+            self._write_structure(con, columns, list(order) + [g for g in groups if g not in order])
+
+    # -- groups -------------------------------------------------------------
+
+    @staticmethod
+    def _group_name(name: str) -> str:
+        name = name.strip()
+        if not name or "," in name:
+            raise ValueError("Bitte einen Gruppennamen ohne Komma angeben")
+        return name
+
+    def add_group(self, name: str) -> None:
+        name = self._group_name(name)
+        with self.tx() as con:
+            columns, groups = self._structure(con)
+            if name in groups:
+                raise ValueError(f"Die Gruppe {name!r} gibt es schon")
+            self._write_structure(con, columns, groups + [name])
+
+    def rename_group(self, old: str, new: str) -> None:
+        new = self._group_name(new)
+        with self.tx() as con:
+            columns, groups = self._structure(con)
+            if new != old and new in groups:
+                raise ValueError(f"Die Gruppe {new!r} gibt es schon")
+            columns = [replace(c, asset_group=new) if c.asset_group == old else c for c in columns]
+            self._write_structure(con, columns, [new if g == old else g for g in groups])
+
+    def move_group(self, name: str, offset: int) -> None:
+        with self.tx() as con:
+            columns, groups = self._structure(con)
+            index = groups.index(name)
+            groups.insert(min(max(index + offset, 0), len(groups) - 1), groups.pop(index))
+            self._write_structure(con, columns, groups)
+
+    def delete_group(self, name: str) -> None:
+        with self.tx() as con:
+            columns, groups = self._structure(con)
+            if any(c.asset_group == name and spec_of(c) in TOP_ACCOUNTS for c in columns):
+                raise ValueError(f"In der Gruppe {name!r} sind noch Konten")
+            self._write_structure(con, columns, [g for g in groups if g != name])
 
     def reset_columns(self, layout: str) -> list[str]:
         """Replace the column configuration by a default layout; returns the names of the removed columns.
@@ -199,34 +320,13 @@ class Store:
         Columns with the same name (and type) as in the layout keep their values, the others are deleted with them.
         """
         new = default_columns(layout)
-        validate(new)
         with self.tx() as con:
             old = {c.name: c for c in self.columns(con)}
-            keep = {c.name for c in new if c.name in old and old[c.name].kind == c.kind}
-            removed = [name for name in old if name not in keep]
-            for name in removed:
-                con.execute("DELETE FROM columns WHERE id = ?", (old[name].id,))
-            for col in new:
-                if col.name in keep:
-                    con.execute(f"UPDATE columns SET {', '.join(f'{f} = ?' for f in COLUMN_FIELDS)} WHERE id = ?",
-                                [*(getattr(col, f) for f in COLUMN_FIELDS), old[col.name].id])
-                else:
-                    self._insert_column(con, col)
-            con.execute("UPDATE meta SET value = ? WHERE key = 'group_order'", (", ".join(LAYOUTS[layout][2]),))
-            self._bump(con)
-            return [name for name in removed if name not in {c.name for c in new}]
-
-    def move_column(self, column_id: int, offset: int) -> None:
-        with self.tx() as con:
-            columns = self.columns(con)
-            index = next(i for i, c in enumerate(columns) if c.id == column_id)
-            new_index = min(max(index + offset, 0), len(columns) - 1)
-            columns.insert(new_index, columns.pop(index))
-            columns = [replace(c, position=i) for i, c in enumerate(columns, start=1)]
-            validate(columns)
-            for c in columns:
-                con.execute("UPDATE columns SET position = ? WHERE id = ?", (c.position, c.id))
-            self._bump(con)
+            columns = [replace(c, id=old[c.name].id) if c.name in old and old[c.name].kind == c.kind else c
+                       for c in new]
+            self._write_structure(con, columns, LAYOUTS[layout][2], DEFAULT_TAX_RATE)
+            con.execute("UPDATE meta SET value = '' WHERE key = 'structure_notes'")
+            return [name for name in old if name not in {c.name for c in new}]
 
     # -- entries ------------------------------------------------------------
 
@@ -293,15 +393,15 @@ class Store:
     def replace_all(self, new_columns: list[Column], entries: list[Entry], income: list[Income] | None) -> None:
         """Replace all entries (and the income if given) in one transaction.
 
-        ``new_columns`` are appended to the configuration first; cells of ``entries`` may refer to them by
-        negative ids (-1 = first new column, ...).
+        ``new_columns`` are added to the configuration first (as other values or notes); cells of ``entries`` may
+        refer to them by negative ids (-1 = first new column, ...).
         """
         with self.tx() as con:
-            columns = self.columns(con)
+            columns, groups = self._structure(con)
             start = max((c.position for c in columns), default=0)
             added = [replace(c, position=start + i, id=None) for i, c in enumerate(new_columns, start=1)]
-            validate(columns + added)
-            ids = {-i: self._insert_column(con, c) for i, c in enumerate(added, start=1)}
+            stored = {c.name: c.id for c in self._write_structure(con, columns + added, groups)}
+            ids = {-i: stored[c.name] for i, c in enumerate(added, start=1)}
             con.execute("DELETE FROM entries")
             for entry in entries:
                 entry_id = int(con.execute("INSERT INTO entries (date) VALUES (?)",

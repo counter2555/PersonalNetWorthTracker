@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Kennzahl · Net Worth{% endblock %}
+{% block content %}
+<h1>{{ "„" ~ col.name ~ "“" if col.id else "Neue Kennzahl" }}</h1>
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" action="{{ root }}/columns/{{ col.id or 'new' }}" class="stack" id="metric-form">
+  <div class="card stack">
+    <label>Name <input name="name" value="{{ col.name }}" required autofocus></label>
+
+    {% if spec == 'total' %}
+      <p class="hint">Wird automatisch berechnet: die Summe aller Konten (Guthaben, Schulden und Depot){% if columns | selectattr('spec', 'equalto', 'tax') | list %}
+        abzüglich der Kapitalertragsteuer{% endif %}. Neue Konten zählen sofort mit.</p>
+    {% elif spec == 'tax' %}
+      <label>Kapitalertragsteuer (%) <input class="number" name="tax_rate" value="{{ tax_rate | rate }}"></label>
+      <p class="hint">Wird automatisch berechnet: dieser Prozentsatz vom Depot-Gewinn, wenn er positiv ist (als negativer Betrag).</p>
+    {% else %}
+      <fieldset class="choice">
+        <legend>Was soll berechnet werden?</legend>
+        {% for key, (label, _) in metrics.items() %}
+        <label class="check option">
+          <input type="radio" name="spec" value="{{ key }}" {% if spec == key %}checked{% endif %}>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </fieldset>
+
+      <fieldset class="choice" data-for="sum share">
+        <legend>Welche Konten?</legend>
+        <div class="members">
+        {% for c in candidates %}
+          <label class="check"><input type="checkbox" name="members" value="{{ c.name }}" {% if c.name in selected %}checked{% endif %}> {{ c.name }}</label>
+        {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="stack" data-for="custom">
+        <label>Formel <textarea name="formula" id="formula" spellcheck="false">{{ col.formula }}</textarea></label>
+        <div class="insert">
+          <span class="hint">Einfügen:</span>
+          {% for c in references %}<button type="button" class="small" data-ref="{{ c.name }}">{{ c.name }}</button>{% endfor %}
+        </div>
+        <p class="hint">
+          Beispiel: <code>{Summe Geld}/{Summe}</code>. Wert des vorigen Eintrags: <code>{Summe@prev}</code>, des ersten Eintrags:
+          <code>{Summe@first}</code>. Funktionen: <code>IF</code>, <code>SUM</code>, <code>MIN</code>, <code>MAX</code>,
+          <code>ABS</code>, <code>ROUND</code>; Operatoren <code>+ - * / ^</code> und Vergleiche <code>= &lt;&gt; &lt; &gt; &lt;= &gt;=</code>.
+          Im Excel wird daraus eine normale Formel.
+        </p>
+        <div class="fields">
+          <label>Format
+            <select name="number_format">
+              {% for key, label in FORMATS.items() %}<option value="{{ key }}" {% if col.number_format == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+        {% if col.id %}<p class="hint">Neue Formeln gelten für alle Einträge (außer Festwerten aus einem Import).</p>{% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <details class="card" {% if col.highlight %}open{% endif %}>
+    <summary>Erweitert (Excel)</summary>
+    <div class="fields" style="margin-top: 12px">
+      <label>Spaltenbreite im Excel <input class="number" name="width" value="{{ col.width if col.width else '' }}" placeholder="automatisch"></label>
+      <label>Hervorhebung <input name="highlight" value="{{ col.highlight }}" placeholder=">25000:red; <15000:yellow"></label>
+    </div>
+    <p class="hint">Hervorhebung: bedingte Formatierung im Excel, Regeln mit <code>;</code> getrennt, Farben <code>red</code>, <code>yellow</code>, <code>green</code>.</p>
+  </details>
+
+  <div class="actions">
+    <button type="submit" class="primary">Speichern</button>
+    <a class="button" href="{{ root }}/columns">Abbrechen</a>
+  </div>
+</form>
+{% if col.id and spec not in ('total', 'tax') %}
+<form method="post" action="{{ root }}/columns/{{ col.id }}/delete" style="margin-top: 16px"
+      onsubmit="return confirm('Kennzahl „{{ col.name }}“ löschen?')">
+  <button type="submit" class="danger">Kennzahl löschen</button>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("metric-form");
+  function sync() {
+    const spec = (form.querySelector("input[name=spec]:checked") || {}).value;
+    form.querySelectorAll("[data-for]").forEach(el => { el.hidden = !el.dataset.for.split(" ").includes(spec); });
+  }
+  form.addEventListener("change", sync);
+  sync();
+  // buttons insert a reference at the cursor
+  const formula = document.getElementById("formula");
+  form.querySelectorAll("[data-ref]").forEach(button => button.addEventListener("click", () => {
+    const text = "{" + button.dataset.ref + "}";
+    const start = formula.selectionStart, end = formula.selectionEnd;
+    formula.setRangeText(text, start, end, "end");
+    formula.focus();
+  }));
+})();
+</script>
+{% endblock %}
