@@ -216,7 +216,7 @@ def test_income_dashboard(client, store, example_xlsx):
     page = client.get("/income/dashboard")
     assert page.status_code == 200
     assert all(f"chart-income-{name}" in page.text for name in ("monthly", "yearly", "cumulative", "spending"))
-    assert "Sparquote" in page.text and 'class=active>Einkommens-Dashboard' in page.text
+    assert "Sparquote" in page.text and 'class="active" aria-current="page">Einkommens-Dashboard' in page.text
 
     download = client.get("/income-dashboard.html")
     assert "attachment" in download.headers["content-disposition"]

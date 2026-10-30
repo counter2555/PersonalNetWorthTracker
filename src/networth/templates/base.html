@@ -6,20 +6,11 @@
 <title>{% block title %}Net Worth{% endblock %}</title>
 <script>{{ THEME_INIT_JS | safe }}</script>
 <style>{{ THEME_CSS | safe }}</style>
-<link rel="stylesheet" href="{{ root }}/static/style.css">
+<link rel="stylesheet" href="{{ root }}/static/style.css?v={{ STYLE_VERSION }}">
 </head>
 <body>
+{% block toolbar %}{{ toolbar | safe }}{% endblock %}
 <main class="{% block main_class %}{% endblock %}">
-{% block toolbar %}
-<div class="toolbar">
-  <nav>
-    {% for href, label in nav %}<a href="{{ root }}{{ href }}"{% if path == root ~ href %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
-    {% if auth_enabled %}<a href="{{ root }}/account"{% if path == root ~ '/account' %} class="active"{% endif %}>{{ user.username }}</a>
-    <form method="post" action="{{ root }}/logout"><button type="submit">Abmelden</button></form>{% endif %}
-  </nav>
-  Darstellung {{ THEME_SWITCH_HTML | safe }}
-</div>
-{% endblock %}
 {% for kind, message in flashes %}<div class="flash {{ kind }}">{{ message }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
