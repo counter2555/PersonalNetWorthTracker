@@ -445,6 +445,7 @@ ACHIEVEMENTS_CSS = """
 .tier-bronze { --tier: #b87333; } .tier-silver { --tier: #8f979e; } .tier-gold { --tier: #e0a100; }
 .tier-platinum { --tier: #8a5cd6; }
 :root { --shame: #d6457a; } :root[data-theme="dark"] { --shame: #e05a8a; }
+[hidden] { display: none !important; }  /* author display rules (.ach is a grid) would override it */
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
 .filters button { font: inherit; font-size: clamp(13px, 0.75vw, 18px); color: var(--ink-secondary); background: var(--surface);
                   border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
