@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Registrieren · Net Worth{% endblock %}
+{% block toolbar %}{% endblock %}
+{% block content %}
+<div class="card login">
+  <h1>Konto anlegen</h1>
+  {% if closed %}
+  <p>Die Registrierung ist geschlossen. Bitte wende dich an den Administrator.</p>
+  {% else %}
+  {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ root }}/register" class="stack">
+    <label>Benutzername <input name="username" value="{{ username or '' }}" autocomplete="username" autocapitalize="none"
+      pattern="[A-Za-z0-9][A-Za-z0-9._\-]{1,31}" required autofocus></label>
+    <label>Passwort <input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Passwort wiederholen <input name="password2" type="password" autocomplete="new-password" minlength="8" required></label>
+    <button type="submit" class="primary">Registrieren</button>
+  </form>
+  <p class="hint">Benutzername: 2–32 Zeichen (Buchstaben, Ziffern, <code>.</code> <code>_</code> <code>-</code>), Passwort mindestens 8 Zeichen.
+    Jedes Konto hat eigene, getrennte Daten.</p>
+  {% endif %}
+  <p class="hint"><a href="{{ root }}/login">Zur Anmeldung</a></p>
+</div>
+{% endblock %}

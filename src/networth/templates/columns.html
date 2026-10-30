@@ -7,7 +7,8 @@
   <a class="button" href="{{ root }}/columns/new">+ Neue Spalte</a>
 </div>
 <p class="hint">Reihenfolge = Spalten im Excel. Die erste Spalte ist immer „{{ DATE_COLUMN }}“.
-  Anlagegruppe und Rolle steuern das Dashboard.</p>
+  Anlagegruppe und Rolle steuern das Dashboard.
+  {% if auth_enabled %}Die Spalten gelten nur für dein Konto – andere Benutzer haben ihre eigene Konfiguration.{% endif %}</p>
 <div class="table-wrap">
 <table>
   <thead><tr><th>Name</th><th class="text">Typ</th><th class="text">Formel</th><th class="text">Format</th>
@@ -33,4 +34,18 @@
   </tbody>
 </table>
 </div>
+
+<form method="post" action="{{ root }}/columns/reset" class="card stack" style="margin-top: 16px"
+      onsubmit="return confirm('Spalten wirklich auf das Standardlayout zurücksetzen?')">
+  <h2>Spalten zurücksetzen</h2>
+  <p class="hint">Ersetzt deine Spalten durch ein Standardlayout. Spalten mit gleichem Namen und Typ behalten ihre Werte,
+    <strong>alle anderen Spalten werden samt ihren Werten gelöscht.</strong></p>
+  <div class="fields">
+    <label>Layout <select name="layout">
+      {% for key, (label, _, _) in LAYOUTS.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select></label>
+  </div>
+  <label class="check"><input type="checkbox" name="confirm" value="yes" required> Nicht enthaltene Spalten und ihre Werte löschen</label>
+  <div class="actions"><button type="submit" class="danger">Zurücksetzen</button></div>
+</form>
 {% endblock %}

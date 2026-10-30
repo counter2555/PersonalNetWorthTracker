@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator
 
 from . import formula as fx
-from .columns import DEFAULT_GROUP_ORDER, Column, default_columns, validate
+from .columns import LAYOUTS, Column, default_columns, validate
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -49,7 +49,6 @@ COLUMN_FIELDS = ["position", "name", "kind", "formula", "number_format", "width"
 
 DEFAULT_SETTINGS = {
     "target": "1000000",
-    "group_order": ", ".join(DEFAULT_GROUP_ORDER),
     "show_distribution": "1",
 }
 
@@ -77,7 +76,8 @@ class Income:
 
 
 class Store:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, layout: str = "full"):
+        """``layout``: column layout (see ``columns.LAYOUTS``) of a new database; an existing one keeps its columns."""
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()  # serialize writes from the thread pool
@@ -85,9 +85,11 @@ class Store:
             con.executescript(SCHEMA)
             for key, value in DEFAULT_SETTINGS.items():
                 con.execute("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)", (key, value))
+            con.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('group_order', ?)",
+                        (", ".join(LAYOUTS[layout][2]),))
             con.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('revision', '0')")
             if con.execute("SELECT COUNT(*) FROM columns").fetchone()[0] == 0:
-                for col in default_columns():
+                for col in default_columns(layout):
                     self._insert_column(con, col)
 
     @contextmanager
@@ -190,6 +192,29 @@ class Store:
             validate(rest)  # e.g. a range {A}:{B} must not lose one of its ends
             con.execute("DELETE FROM columns WHERE id = ?", (column_id,))
             self._bump(con)
+
+    def reset_columns(self, layout: str) -> list[str]:
+        """Replace the column configuration by a default layout; returns the names of the removed columns.
+
+        Columns with the same name (and type) as in the layout keep their values, the others are deleted with them.
+        """
+        new = default_columns(layout)
+        validate(new)
+        with self.tx() as con:
+            old = {c.name: c for c in self.columns(con)}
+            keep = {c.name for c in new if c.name in old and old[c.name].kind == c.kind}
+            removed = [name for name in old if name not in keep]
+            for name in removed:
+                con.execute("DELETE FROM columns WHERE id = ?", (old[name].id,))
+            for col in new:
+                if col.name in keep:
+                    con.execute(f"UPDATE columns SET {', '.join(f'{f} = ?' for f in COLUMN_FIELDS)} WHERE id = ?",
+                                [*(getattr(col, f) for f in COLUMN_FIELDS), old[col.name].id])
+                else:
+                    self._insert_column(con, col)
+            con.execute("UPDATE meta SET value = ? WHERE key = 'group_order'", (", ".join(LAYOUTS[layout][2]),))
+            self._bump(con)
+            return [name for name in removed if name not in {c.name for c in new}]
 
     def move_column(self, column_id: int, offset: int) -> None:
         with self.tx() as con:

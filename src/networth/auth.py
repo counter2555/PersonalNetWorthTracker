@@ -1,14 +1,18 @@
-"""Single-user authentication: login form with a signed session cookie, or HTTP Basic auth (for scripts)."""
+"""Authentication: login form with a signed session cookie, or HTTP Basic auth (for scripts)."""
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
 import secrets
+from typing import TYPE_CHECKING
 
 from fastapi import Request
 
 from .config import Config
+
+if TYPE_CHECKING:
+    from .users import User, Users
 
 ITERATIONS = 600_000
 
@@ -31,36 +35,37 @@ def verify_password(password: str, encoded: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
-def check_credentials(config: Config, username: str, password: str) -> bool:
-    user_ok = hmac.compare_digest(username.encode(), config.username.encode())
-    if config.password_hash:
-        password_ok = verify_password(password, config.password_hash)
-    else:
-        password_ok = bool(config.password) and hmac.compare_digest(password.encode(), config.password.encode())
-    return user_ok and password_ok
-
-
-def _basic_auth(config: Config, request: Request) -> bool:
+def _basic_auth(users: Users, request: Request) -> User | None:
     header = request.headers.get("authorization", "")
     scheme, _, value = header.partition(" ")
     if scheme.lower() != "basic" or not value:
-        return False
+        return None
     try:
         username, _, password = base64.b64decode(value).decode().partition(":")
     except (ValueError, UnicodeDecodeError):
-        return False
-    return check_credentials(config, username, password)
+        return None
+    return users.authenticate(username, password)
 
 
-def is_authenticated(config: Config, request: Request) -> bool:
+def current_user(config: Config, users: Users, request: Request) -> User | None:
+    """The logged in user: from the session cookie, else HTTP Basic auth; the configured admin without login."""
     if config.auth_disabled:
-        return True
-    if request.session.get("user") == config.username:
-        return True
-    return _basic_auth(config, request)
+        return users.by_name(config.username) or next((u for u in users.all() if u.is_admin), None)
+    user_id = request.session.get("uid")
+    if isinstance(user_id, int):
+        user = users.get(user_id)  # a deleted account is logged out immediately
+        if user is not None:
+            return user
+        request.session.clear()
+    return _basic_auth(users, request)
 
 
-def ensure_configured(config: Config) -> None:
+def ensure_configured(config: Config, users: Users) -> None:
+    """Create the first administrator from NWT_USERNAME/NWT_PASSWORD(_HASH) on the first start."""
+    if users.count():
+        return
     if not config.auth_disabled and not (config.password or config.password_hash):
-        raise SystemExit("Kein Passwort gesetzt: NWT_PASSWORD oder NWT_PASSWORD_HASH setzen "
-                         "(oder NWT_AUTH_DISABLED=true, z. B. hinter einem Reverse-Proxy mit eigener Anmeldung).")
+        raise SystemExit("Noch kein Benutzer angelegt: für den ersten Administrator NWT_PASSWORD oder "
+                         "NWT_PASSWORD_HASH setzen (oder NWT_AUTH_DISABLED=true, z. B. hinter einem Reverse-Proxy "
+                         "mit eigener Anmeldung).")
+    users.bootstrap(config.username, config.password, config.password_hash)

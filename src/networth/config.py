@@ -17,17 +17,13 @@ def _flag(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class Config:
     data_dir: Path
-    username: str
-    password: str  # plain text (NWT_PASSWORD), only if no hash is given
+    username: str  # first administrator, created on the first start (NWT_USERNAME)
+    password: str  # its password in plain text (NWT_PASSWORD), only if no hash is given
     password_hash: str  # NWT_PASSWORD_HASH, created with `networth hash-password`
     secret_key: str
     auth_disabled: bool
     secure_cookies: bool
     session_days: int
-
-    @property
-    def database(self) -> Path:
-        return self.data_dir / "networth.sqlite"
 
     @staticmethod
     def from_env() -> "Config":

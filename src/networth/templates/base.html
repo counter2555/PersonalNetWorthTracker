@@ -13,8 +13,9 @@
 {% block toolbar %}
 <div class="toolbar">
   <nav>
-    {% for href, label in NAV %}<a href="{{ root }}{{ href }}"{% if path == root ~ href %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
-    {% if auth_enabled %}<form method="post" action="{{ root }}/logout"><button type="submit">Abmelden</button></form>{% endif %}
+    {% for href, label in nav %}<a href="{{ root }}{{ href }}"{% if path == root ~ href %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+    {% if auth_enabled %}<a href="{{ root }}/account"{% if path == root ~ '/account' %} class="active"{% endif %}>{{ user.username }}</a>
+    <form method="post" action="{{ root }}/logout"><button type="submit">Abmelden</button></form>{% endif %}
   </nav>
   Darstellung {{ THEME_SWITCH_HTML | safe }}
 </div>
@@ -23,6 +24,27 @@
 {% block content %}{% endblock %}
 </main>
 <script>{{ THEME_SWITCH_JS | safe }}</script>
+{% if user and auth_enabled %}
+<script>
+// all tabs share the login: tie forms to the user this page was rendered for, reload if someone else logged in
+(() => {
+  const uid = "{{ user.id }}";
+  for (const form of document.querySelectorAll("form[method=post]")) {
+    const input = document.createElement("input");
+    input.type = "hidden"; input.name = "as_user"; input.value = uid;
+    form.appendChild(input);
+  }
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible") return;
+    try {
+      const response = await fetch("{{ root }}/whoami", {headers: {accept: "application/json"}});
+      const current = response.ok ? String((await response.json()).id) : null;
+      if (current !== uid) location.reload();
+    } catch (e) { /* offline: keep the page */ }
+  });
+})();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

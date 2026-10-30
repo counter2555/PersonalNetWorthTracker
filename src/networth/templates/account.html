@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Konto · Net Worth{% endblock %}
+{% block content %}
+<h1>Konto „{{ user.username }}“</h1>
+<p class="muted">{% if user.is_admin %}Administrator{% else %}Benutzer{% endif %} · angelegt am {{ user.created[:10] }}</p>
+<form method="post" action="{{ root }}/account/password" class="card stack">
+  <h2>Passwort ändern</h2>
+  <div class="fields">
+    <label>Aktuelles Passwort <input name="current" type="password" autocomplete="current-password" required></label>
+    <label>Neues Passwort <input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Wiederholen <input name="password2" type="password" autocomplete="new-password" minlength="8" required></label>
+  </div>
+  <div class="actions"><button type="submit" class="primary">Passwort ändern</button></div>
+</form>
+{% endblock %}

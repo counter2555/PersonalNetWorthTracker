@@ -1,4 +1,4 @@
-"""Command line: run the server, import/export Excel files, create a password hash."""
+"""Command line: run the server, import/export Excel files, manage users, create a password hash."""
 from __future__ import annotations
 
 import argparse
@@ -7,15 +7,32 @@ import os
 from pathlib import Path
 from typing import Sequence
 
-from .auth import hash_password
+from .auth import ensure_configured, hash_password
 from .config import Config
 from .db import Store
 from .excel import export_workbook, import_workbook
 from .sheet import compute
+from .users import UserError, Users
 
 
-def _store() -> Store:
-    return Store(Config.from_env().database)
+def _users() -> Users:
+    config = Config.from_env()
+    users = Users(config.data_dir)
+    if not users.count() and (config.password or config.password_hash or config.auth_disabled):
+        ensure_configured(config, users)
+    return users
+
+
+def _store(username: str | None) -> Store:
+    """Data of ``username``; without a name the one of the only account or of NWT_USERNAME."""
+    users = _users()
+    accounts = users.all()
+    if username is None:
+        username = accounts[0].username if len(accounts) == 1 else Config.from_env().username
+    user = users.by_name(username)
+    if user is None:
+        raise SystemExit(f"Benutzer {username!r} nicht gefunden (vorhanden: {', '.join(u.username for u in accounts)})")
+    return users.store(user.id)
 
 
 def serve(args: argparse.Namespace) -> None:
@@ -27,7 +44,7 @@ def serve(args: argparse.Namespace) -> None:
 
 
 def import_excel(args: argparse.Namespace) -> None:
-    store = _store()
+    store = _store(args.user)
     result = import_workbook(args.file.read_bytes(), store.columns())
     store.replace_all(result.new_columns, result.entries, result.income)
     print(f"{len(result.entries)} Einträge importiert"
@@ -37,16 +54,48 @@ def import_excel(args: argparse.Namespace) -> None:
 
 
 def export_excel(args: argparse.Namespace) -> None:
-    store = _store()
+    store = _store(args.user)
     columns, entries = store.columns(), store.entries()
     args.file.write_bytes(export_workbook(columns, entries, compute(columns, entries), store.income()))
     print(f"Exportiert nach {args.file}")
 
 
-def password(args: argparse.Namespace) -> None:
+def _ask_password() -> str:
     value = getpass.getpass("Passwort: ")
     if value != getpass.getpass("Wiederholen: "):
         raise SystemExit("Passwörter stimmen nicht überein")
+    return value
+
+
+def create_user(args: argparse.Namespace) -> None:
+    try:
+        user = _users().create(args.username, _ask_password(), is_admin=args.admin)
+    except UserError as exc:
+        raise SystemExit(str(exc))
+    print(f"Benutzer {user.username!r} angelegt" + (" (Administrator)" if user.is_admin else ""))
+
+
+def set_password(args: argparse.Namespace) -> None:
+    users = _users()
+    user = users.by_name(args.username)
+    if user is None:
+        raise SystemExit(f"Benutzer {args.username!r} nicht gefunden")
+    try:
+        users.set_password(user.id, _ask_password())
+        if args.admin:
+            users.set_admin(user.id, True)
+    except UserError as exc:
+        raise SystemExit(str(exc))
+    print(f"Passwort von {user.username!r} geändert" + (", jetzt Administrator" if args.admin else ""))
+
+
+def list_users(args: argparse.Namespace) -> None:
+    for user in _users().all():
+        print(f"{user.username:<32} {'Administrator' if user.is_admin else 'Benutzer':<14} angelegt {user.created[:10]}")
+
+
+def password(args: argparse.Namespace) -> None:
+    value = _ask_password()
     encoded = hash_password(value)
     print(encoded)
     print("In docker-compose/.env die $-Zeichen verdoppeln: NWT_PASSWORD_HASH=" + encoded.replace("$", "$$"))
@@ -63,11 +112,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("import", help="Excel importieren (ersetzt alle Einträge)")
     p.add_argument("file", type=Path)
+    p.add_argument("--user", help="Benutzer (Standard: der einzige Benutzer bzw. NWT_USERNAME)")
     p.set_defaults(func=import_excel)
 
     p = sub.add_parser("export", help="Excel exportieren")
     p.add_argument("file", type=Path)
+    p.add_argument("--user", help="Benutzer (Standard: der einzige Benutzer bzw. NWT_USERNAME)")
     p.set_defaults(func=export_excel)
+
+    p = sub.add_parser("create-user", help="Benutzer anlegen")
+    p.add_argument("username")
+    p.add_argument("--admin", action="store_true", help="als Administrator")
+    p.set_defaults(func=create_user)
+
+    p = sub.add_parser("set-password", help="Passwort eines Benutzers setzen (z. B. Admin-Passwort vergessen)")
+    p.add_argument("username")
+    p.add_argument("--admin", action="store_true", help="zusätzlich zum Administrator machen")
+    p.set_defaults(func=set_password)
+
+    p = sub.add_parser("users", help="Benutzer auflisten")
+    p.set_defaults(func=list_users)
 
     p = sub.add_parser("hash-password", help="Passwort-Hash für NWT_PASSWORD_HASH erzeugen")
     p.set_defaults(func=password)

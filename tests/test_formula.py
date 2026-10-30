@@ -65,6 +65,7 @@ def test_number_input_rejects_text():
 
 def test_default_columns_are_valid():
     validate(default_columns())
+    validate(default_columns("basic"))
 
 
 def test_cycle_detected():

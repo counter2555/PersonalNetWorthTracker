@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Benutzer · Net Worth{% endblock %}
+{% block content %}
+<h1>Benutzer ({{ accounts | length }})</h1>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Benutzername</th><th class="text">Rolle</th><th>Angelegt</th><th>Letzte Anmeldung</th><th>Daten</th>
+    <th class="text">Neues Passwort</th><th></th></tr></thead>
+  <tbody>
+  {% for account, size in accounts %}
+    <tr>
+      <td>{{ account.username }}{% if account.id == user.id %} <span class="muted">(du)</span>{% endif %}</td>
+      <td class="text">
+        <form method="post" action="{{ root }}/admin/users/{{ account.id }}/admin" class="inline">
+          {% if account.is_admin %}Administrator
+            <button type="submit" class="small">Admin entziehen</button>
+          {% else %}Benutzer
+            <input type="hidden" name="is_admin" value="1">
+            <button type="submit" class="small">Zum Admin machen</button>
+          {% endif %}
+        </form>
+      </td>
+      <td>{{ account.created[:10] }}</td>
+      <td>{{ (account.last_login or '')[:16] | replace('T', ' ') }}</td>
+      <td>{{ '%.0f' | format(size / 1024) }} KB</td>
+      <td class="text">
+        <form method="post" action="{{ root }}/admin/users/{{ account.id }}/password" class="actions">
+          <input name="password" type="password" autocomplete="new-password" minlength="8" required style="width: 160px">
+          <button type="submit" class="small">Setzen</button>
+        </form>
+      </td>
+      <td>{% if account.id != user.id %}
+        <form method="post" action="{{ root }}/admin/users/{{ account.id }}/delete" class="inline"
+              onsubmit="return confirm('Benutzer „{{ account.username }}“ und alle Daten endgültig löschen?')">
+          <button type="submit" class="small danger">Löschen</button></form>
+      {% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<form method="post" action="{{ root }}/admin/users" class="card stack" style="margin-top: 16px">
+  <h2>Benutzer anlegen</h2>
+  <div class="fields">
+    <label>Benutzername <input name="username" autocomplete="off" autocapitalize="none" required></label>
+    <label>Passwort <input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+  </div>
+  <label class="check"><input type="checkbox" name="is_admin" value="1"> Administrator</label>
+  <div class="actions"><button type="submit" class="primary">Anlegen</button></div>
+</form>
+
+<form method="post" action="{{ root }}/admin/registration" class="card stack">
+  <h2>Registrierung</h2>
+  <label class="check"><input type="checkbox" name="open" value="1" {% if registration %}checked{% endif %}>
+    Neue Benutzer dürfen sich selbst registrieren</label>
+  <p class="hint">Jedes Konto hat eigene Einträge, Spalten, Einkommen und Einstellungen. Administratoren verwalten die Konten,
+    sehen aber nicht die Daten der anderen.</p>
+  <div class="actions"><button type="submit">Speichern</button></div>
+</form>
+{% endblock %}
