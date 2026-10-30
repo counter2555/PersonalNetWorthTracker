@@ -1,4 +1,5 @@
-/* Pages besides the dashboard; colors come from the theme variables (dashboard.THEME_CSS). */
+/* Pages besides the dashboard; colors come from the theme variables (dashboard.THEME_CSS), the top bar from
+   dashboard.TOOLBAR_CSS. */
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page, #f9f9f7); color: var(--ink, #0b0b0b);
        font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; }
@@ -7,19 +8,6 @@ main.wide { max-width: none; }
 a { color: var(--accent); }
 h1 { font-size: 22px; margin: 8px 0 16px; }
 h2 { font-size: 17px; margin: 0 0 8px; }
-.toolbar { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 12px;
-           color: var(--ink-secondary); font-size: 14px; }
-.toolbar nav { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-right: auto; }
-.toolbar nav a { color: var(--ink-secondary); text-decoration: none; }
-.toolbar nav a:hover { color: var(--ink); text-decoration: underline; }
-.toolbar nav a.active { color: var(--ink); font-weight: 600; }
-.toolbar nav form { display: inline; margin: 0; }
-.toolbar nav button { font: inherit; color: var(--ink-secondary); background: none; border: 0; padding: 0; cursor: pointer; }
-.toolbar nav button:hover { color: var(--ink); text-decoration: underline; }
-.theme-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.theme-switch button { font: inherit; color: var(--ink-secondary); background: var(--surface); border: 0;
-                       padding: 4px 12px; cursor: pointer; }
-.theme-switch button[aria-pressed="true"] { background: var(--grid); color: var(--ink); font-weight: 600; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
         margin-bottom: 16px; }
 .muted, .hint { color: var(--ink-muted); font-size: 13px; }

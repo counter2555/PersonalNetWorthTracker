@@ -39,10 +39,12 @@ SIGN_IN_PATHS = {"/login", "/register", "/logout"}
 PAGE_SIZES = (25, 50, 100)  # entries per page; 0 = all
 DEFAULT_PAGE_SIZE = 50
 
-NAV = [("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/achievements", "Erfolge"),
-       ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
-       ("/columns", "Konten & Kennzahlen"), ("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]
+# menu groups, shown with a divider in between: evaluations, data, administration
+NAV = [[("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/achievements", "Erfolge")],
+       [("/entries", "Einträge"), ("/income", "Einkommen"), ("/columns", "Konten & Kennzahlen")],
+       [("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]]
 ADMIN_NAV = [("/admin/users", "Benutzer")]
+NEW_ENTRY = ("/entries/new", "+ Neuer Eintrag")  # highlighted as the main action
 NEW_GROUP = "__new__"  # account form: option "new group"
 
 
@@ -133,11 +135,11 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     app.state.config, app.state.users = config, users
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.filters.update(value=format_value, date=format_date, input=format_input, rate=format_rate)
-    templates.env.globals.update(NAV=NAV, LAYOUTS=LAYOUTS, FORMATS=FORMATS, SPECS=SPECS, ACCOUNT_SPECS=ACCOUNT_SPECS,
+    templates.env.globals.update(LAYOUTS=LAYOUTS, FORMATS=FORMATS, SPECS=SPECS, ACCOUNT_SPECS=ACCOUNT_SPECS,
                                  METRICS=METRICS, NEW_GROUP=NEW_GROUP, DATE_COLUMN=DATE_COLUMN,
-                                 auth_enabled=not config.auth_disabled, THEME_CSS=dashboard.THEME_CSS,
-                                 THEME_INIT_JS=dashboard.THEME_INIT_JS, THEME_SWITCH_JS=dashboard.THEME_SWITCH_JS,
-                                 THEME_SWITCH_HTML=dashboard.THEME_SWITCH_HTML)
+                                 auth_enabled=not config.auth_disabled,
+                                 THEME_CSS=dashboard.THEME_CSS + dashboard.TOOLBAR_CSS,
+                                 THEME_INIT_JS=dashboard.THEME_INIT_JS, THEME_SWITCH_JS=dashboard.THEME_SWITCH_JS)
 
     cache: dict[str, tuple[int, str]] = {}
     cache_lock = threading.Lock()
@@ -164,9 +166,12 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     def page(request: Request, name: str, status_code: int = 200, **context) -> HTMLResponse:
         flashes = request.session.pop("flash", []) if "session" in request.scope else []
         user = getattr(request.state, "user", None)
-        return templates.TemplateResponse(request, name, {"root": _root(request), "flashes": flashes,
+        root = _root(request)
+        nav = "" if user is None else _nav_html(root, request.url.path.removeprefix(root), user,
+                                                logout=not config.auth_disabled)
+        return templates.TemplateResponse(request, name, {"root": root, "flashes": flashes,
                                                           "path": request.url.path, "user": user,
-                                                          "nav": _nav(user), **context},
+                                                          "toolbar": dashboard.toolbar_html(nav), **context},
                                           status_code=status_code)
 
     def data(request: Request) -> Store:
@@ -800,15 +805,21 @@ def _attachment(stem: str, extension: str) -> str:
     return f'attachment; filename="{stem}_{dt.date.today():%Y-%m-%d}.{extension}"'
 
 
-def _nav(user: User | None) -> list[tuple[str, str]]:
-    return NAV + ADMIN_NAV if user is not None and user.is_admin else NAV
+def _nav(user: User | None) -> list[list[tuple[str, str]]]:
+    return NAV[:-1] + [NAV[-1] + ADMIN_NAV] if user is not None and user.is_admin else NAV
 
 
 def _nav_html(root: str, active: str, user: User, logout: bool) -> str:
-    links = "".join(f'<a href="{html.escape(root + href)}"{" class=active" if href == active else ""}>'
-                    f"{html.escape(label)}</a>" for href, label in _nav(user))
+    """Menu of the top bar (``dashboard.toolbar_html``); ``active``: the current path without ``root``."""
+    def link(href: str, label: str, css: str = "") -> str:
+        classes = " ".join(filter(None, [css, "active" if href == active else ""]))
+        attributes = (f' class="{classes}"' if classes else "") + (' aria-current="page"' if href == active else "")
+        return f'<a href="{html.escape(root + href)}"{attributes}>{html.escape(label)}</a>'
+
+    links = '<span class="nav-sep"></span>'.join("".join(link(*item) for item in group) for group in _nav(user))
+    account = ""
     if logout:
-        links += f'<a href="{html.escape(root)}/account">{html.escape(user.username)}</a>'
-        links += (f'<form method="post" action="{html.escape(root)}/logout" class="logout">'
-                  '<button type="submit">Abmelden</button></form>')
-    return f"<nav>{links}</nav>"
+        account = (f'<div class="account">{link("/account", user.username)}'
+                   f'<form method="post" action="{html.escape(root)}/logout">'
+                   '<button type="submit">Abmelden</button></form></div>')
+    return f'<nav aria-label="Hauptmenü">{links}</nav>{link(*NEW_ENTRY, css="cta")}{account}'

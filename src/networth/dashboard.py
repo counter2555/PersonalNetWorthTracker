@@ -638,24 +638,46 @@ THEME_CSS = f"""
 :root[data-theme="dark"] {{ color-scheme: dark; {_css_variables(DARK)} }}
 """
 
+# Top bar of every page (dashboards and static/style.css pages alike): fixed px sizes and full width, so it looks the
+# same everywhere and doesn't jump between pages.
+TOOLBAR_CSS = f"""
+.toolbar {{ position: sticky; top: 0; z-index: 10; background: var(--surface); border-bottom: 1px solid var(--border);
+            font: 500 14px/20px {FONT}; color: var(--ink-secondary); }}
+.toolbar-inner {{ display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 12px;
+                  padding: 8px clamp(16px, 2vw, 48px); }}
+.toolbar nav {{ display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; flex: 1 1 0; min-width: 0; }}
+.toolbar .nav-sep {{ flex: none; width: 1px; height: 20px; margin: 0 6px; background: var(--grid); }}
+.toolbar a, .toolbar .account button {{ flex: none; white-space: nowrap; font: inherit; color: var(--ink-secondary);
+    text-decoration: none; background: none; border: 0; border-radius: 8px; padding: 6px 9px; cursor: pointer; }}
+.toolbar a:hover, .toolbar .account button:hover {{ background: var(--grid); color: var(--ink); }}
+.toolbar a.active {{ background: var(--accent-track); color: var(--ink); }}
+.toolbar a.cta {{ background: var(--accent); color: #fff; }}
+.toolbar a.cta:hover {{ filter: brightness(1.1); }}
+.toolbar a:focus-visible, .toolbar button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 1px; }}
+.toolbar .account {{ display: flex; align-items: center; gap: 2px; padding-left: 10px;
+                     border-left: 1px solid var(--grid); }}
+.toolbar .account form {{ display: flex; margin: 0; }}
+.theme-switch {{ display: inline-flex; flex: none; border: 1px solid var(--grid); border-radius: 8px;
+                 overflow: hidden; }}
+.theme-switch button {{ font: inherit; color: var(--ink-secondary); background: var(--surface); border: 0;
+                        padding: 5px 10px; line-height: 20px; cursor: pointer; }}
+.theme-switch button:hover {{ color: var(--ink); }}
+.theme-switch button[aria-pressed="true"] {{ background: var(--grid); color: var(--ink); }}
+.theme-switch button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
+/* too narrow for one row: the menu gets its own row(s) below "new entry", account and theme switch */
+@media (max-width: 1360px) {{
+  .toolbar nav {{ order: 1; flex-basis: 100%; }}
+  .toolbar a.cta {{ margin-right: auto; }}
+}}
+/* phones: the wrapped bar would take too much of the screen when it stays on top */
+@media (max-width: 760px) {{ .toolbar {{ position: static; }} .toolbar .nav-sep {{ display: none; }} }}
+"""
+
 CSS = THEME_CSS + f"""
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; background: var(--page); color: var(--ink); font-family: {FONT}; }}
 main {{ max-width: 3200px; margin: 0 auto; padding: 16px clamp(16px, 2vw, 48px) 48px; }}
-.toolbar {{ display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 12px;
-           color: var(--ink-secondary); font-size: clamp(13px, 0.75vw, 18px); }}
-.toolbar nav {{ display: flex; flex-wrap: wrap; gap: 4px 16px; margin-right: auto; }}
-.toolbar nav a {{ color: var(--ink-secondary); text-decoration: none; }}
-.toolbar nav a:hover {{ color: var(--ink); text-decoration: underline; }}
-.toolbar nav a.active {{ color: var(--ink); font-weight: 600; }}
-.toolbar nav form {{ display: inline; margin: 0; }}
-.toolbar nav button {{ font: inherit; color: var(--ink-secondary); background: none; border: 0; padding: 0; cursor: pointer; }}
-.toolbar nav button:hover {{ color: var(--ink); text-decoration: underline; }}
-.theme-switch {{ display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }}
-.theme-switch button {{ font: inherit; color: var(--ink-secondary); background: var(--surface); border: 0;
-                        padding: 4px 12px; cursor: pointer; }}
-.theme-switch button[aria-pressed="true"] {{ background: var(--grid); color: var(--ink); font-weight: 600; }}
-.theme-switch button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
+{TOOLBAR_CSS}
 header {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }}
 .kpi {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }}
 .kpi.hero {{ grid-column: span 2; }}
@@ -726,6 +748,13 @@ THEME_SWITCH_HTML = """<div class="theme-switch" role="group" aria-label="Darste
     <button type="button" data-theme-choice="light" aria-pressed="false">Hell</button>
     <button type="button" data-theme-choice="dark" aria-pressed="false">Dunkel</button>
   </div>"""
+
+
+
+def toolbar_html(nav: str = "") -> str:
+    """Top bar with the navigation ``nav`` (``app._nav_html``) and the theme switch."""
+    return f'<div class="toolbar"><div class="toolbar-inner">{nav}{THEME_SWITCH_HTML}</div></div>'
+
 
 # Every chart is embedded once per theme (FIGURES[id][theme]); switching re-renders it with the other spec.
 DASHBOARD_JS = f"""
@@ -914,10 +943,8 @@ def page_html(title: str, kpis: str, cards: Sequence[str], figures: dict[str, di
 {plotly}
 </head>
 <body>
+{toolbar_html(nav)}
 <main>
-<div class="toolbar">{nav}Darstellung
-  {THEME_SWITCH_HTML}
-</div>
 <header>{kpis}</header>
 <div class="grid">{"".join(cards)}</div>
 {footer}

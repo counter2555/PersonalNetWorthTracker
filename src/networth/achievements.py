@@ -16,8 +16,8 @@ import pandas as pd
 
 from .columns import DATE_COLUMN, Layout
 from .dashboard import (CSS, DEPOT_PAID_IN, DEPOT_VALUE, MARKET_GAIN, MONTHS_DE, NET_GAINS, TAX, THEME_INIT_JS,
-                        THEME_SWITCH_HTML, THEME_SWITCH_JS, TOTAL, Data, Summary, _de, _euro, _kpi, _percent,
-                        period_flows, period_salaries, prepare_data, summarize)
+                        THEME_SWITCH_JS, TOTAL, Data, Summary, _de, _euro, _kpi, _percent, period_flows,
+                        period_salaries, prepare_data, summarize, toolbar_html)
 from .income_dashboard import monthly_income, yearly_income
 
 TIERS = {"bronze": ("Bronze", 10), "silver": ("Silber", 25), "gold": ("Gold", 50), "platinum": ("Platin", 100)}
@@ -522,10 +522,8 @@ def build_page(items: Sequence[Achievement], nav: str = "", hints: Sequence[str]
 <style>{CSS}{ACHIEVEMENTS_CSS}</style>
 </head>
 <body>
+{toolbar_html(nav)}
 <main>
-<div class="toolbar">{nav}Darstellung
-  {THEME_SWITCH_HTML}
-</div>
 <header>{_kpis(items)}</header>
 <div class="filters" role="group" aria-label="Filter">{filters}</div>
 {notes}
