@@ -188,3 +188,25 @@ def test_reset_columns(app, users, store):
 
     client.post("/columns/reset", data={"layout": "full", "confirm": "yes"})
     assert [c.name for c in store.columns()] == [c.name for c in default_columns()]
+
+
+def test_forms_of_another_user_are_refused(app, users, store):
+    """Tabs share the session: a form shown to the admin must not change the data of a user logged in later."""
+    client = client_for(app, "tester", "test-password")
+    tester = users.by_name("tester")
+    page = client.get("/columns").text
+    assert 'name = "as_user"' in page and f'const uid = "{tester.id}"' in page
+    assert client.get("/whoami").json()["username"] == "tester"
+
+    client.post("/register", data={"username": "lea", "password": "secret-pass", "password2": "secret-pass"})
+    lea = users.store(users.by_name("lea").id)
+    response = client.post("/columns/new", data={"name": "Fremd", "kind": "input", "number_format": "currency",
+                                                 "as_user": str(tester.id)})
+    assert "Nicht gespeichert" in response.text and "„lea“" in response.text
+    assert "Fremd" not in [c.name for c in lea.columns() + store.columns()]
+
+    client.post("/columns/new", data={"name": "Eigene", "kind": "input", "number_format": "currency",
+                                      "as_user": str(users.by_name("lea").id)})
+    assert "Eigene" in [c.name for c in lea.columns()]
+    assert client.post("/income", data={"date": "2024-01-31", "amount": "1"}).status_code == 200  # scripts
+    assert len(lea.income()) == 1

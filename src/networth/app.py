@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import plotly
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,6 +28,7 @@ from .users import User, UserError, Users
 
 HERE = Path(__file__).parent
 PUBLIC_PATHS = {"/login", "/register", "/healthz", "/static/style.css"}
+SIGN_IN_PATHS = {"/login", "/register", "/logout"}
 
 PAGE_SIZES = (25, 50, 100)  # entries per page; 0 = all
 DEFAULT_PAGE_SIZE = 50
@@ -80,7 +81,28 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     users = users or Users(config.data_dir)
     ensure_configured(config, users)
 
-    app = FastAPI(title="Net Worth Tracker", docs_url=None, redoc_url=None, openapi_url=None)
+    async def same_user(request: Request) -> None:
+        """Refuse forms that were shown to another user of this browser.
+
+        All tabs of a browser share the session cookie: after logging in as someone else in a second tab, a form
+        still open in the first tab would otherwise change the data of the new user. Pages add the user id they were
+        rendered for to every form (``as_user``, see base.html); scripts without it are not affected.
+        """
+        if request.method != "POST" or _path(request) in SIGN_IN_PATHS:
+            return
+        user = getattr(request.state, "user", None)
+        expected = (await request.form()).get("as_user")  # cached, the endpoint reads the same form
+        if user is not None and expected is not None and str(expected) != str(user.id):
+            raise UserSwitched(user.username)
+
+    app = FastAPI(title="Net Worth Tracker", docs_url=None, redoc_url=None, openapi_url=None,
+                  dependencies=[Depends(same_user)])
+
+    @app.exception_handler(UserSwitched)
+    async def user_switched(request: Request, exc: UserSwitched):
+        return redirect(request, "/", f"Nicht gespeichert: In diesem Browser ist inzwischen „{exc.username}“ "
+                                      "angemeldet (z. B. in einem anderen Tab). Die Seite zeigt jetzt dessen Daten.",
+                        "error")
     app.state.config, app.state.users = config, users
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.filters.update(value=format_value, date=format_date, input=format_input)
@@ -94,7 +116,7 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
-        path = request.url.path.removeprefix(request.scope.get("root_path", ""))
+        path = _path(request)
         user = await asyncio.to_thread(current_user, config, users, request)  # Basic auth hashes the password
         request.state.user = user
         if user is not None or path in PUBLIC_PATHS:
@@ -184,6 +206,11 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
             return page(request, "register.html", status_code=422, error=str(exc), username=username)
         sign_in(request, user)
         return redirect(request, "/", f"Willkommen, {user.username}! Dein Konto wurde angelegt.")
+
+    @app.get("/whoami")
+    def whoami(request: Request):
+        """Lets open pages notice a login as another user in a different tab (base.html reloads them)."""
+        return {"id": request.state.user.id, "username": request.state.user.username}
 
     @app.post("/logout")
     def logout(request: Request):
@@ -642,6 +669,16 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
         return redirect(request, "/admin/users", f"Benutzer „{user.username}“ und alle Daten gelöscht")
 
     return app
+
+
+class UserSwitched(Exception):
+    def __init__(self, username: str):
+        super().__init__(username)
+        self.username = username
+
+
+def _path(request: Request) -> str:
+    return request.url.path.removeprefix(request.scope.get("root_path", ""))
 
 
 def _root(request: Request) -> str:
