@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import hashlib
 import html
 import json
 import threading
@@ -33,6 +34,8 @@ from .structure import (ACCOUNT_SPECS, AUTOMATIC, DEFAULT_NAMES, DEPOT_METRICS, 
 from .users import User, UserError, Users
 
 HERE = Path(__file__).parent
+# appended to the stylesheet URL, so browsers load a changed style.css instead of a cached old one
+STYLE_VERSION = hashlib.sha256((HERE / "static" / "style.css").read_bytes()).hexdigest()[:12]
 PUBLIC_PATHS = {"/login", "/register", "/healthz", "/static/style.css"}
 SIGN_IN_PATHS = {"/login", "/register", "/logout"}
 
@@ -137,7 +140,7 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     templates.env.filters.update(value=format_value, date=format_date, input=format_input, rate=format_rate)
     templates.env.globals.update(LAYOUTS=LAYOUTS, FORMATS=FORMATS, SPECS=SPECS, ACCOUNT_SPECS=ACCOUNT_SPECS,
                                  METRICS=METRICS, NEW_GROUP=NEW_GROUP, DATE_COLUMN=DATE_COLUMN,
-                                 auth_enabled=not config.auth_disabled,
+                                 auth_enabled=not config.auth_disabled, STYLE_VERSION=STYLE_VERSION,
                                  THEME_CSS=dashboard.THEME_CSS + dashboard.TOOLBAR_CSS,
                                  THEME_INIT_JS=dashboard.THEME_INIT_JS, THEME_SWITCH_JS=dashboard.THEME_SWITCH_JS)
 

@@ -6,7 +6,7 @@
 <title>{% block title %}Net Worth{% endblock %}</title>
 <script>{{ THEME_INIT_JS | safe }}</script>
 <style>{{ THEME_CSS | safe }}</style>
-<link rel="stylesheet" href="{{ root }}/static/style.css">
+<link rel="stylesheet" href="{{ root }}/static/style.css?v={{ STYLE_VERSION }}">
 </head>
 <body>
 {% block toolbar %}{{ toolbar | safe }}{% endblock %}
