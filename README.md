@@ -13,9 +13,10 @@ Self-hosted Service (Docker) zum Erfassen des Vermögens von überall – mit Ex
   mit Stufen (Bronze bis Platin), Punkten, Fortschrittsbalken, geheimen und negativen „Schande“-Achievements.
 * **Excel-Export** jederzeit: Sheet „Net Worth“ mit Formeln, Formaten und bedingter Formatierung, Sheet „Income“.
 * **Excel-Import** der bestehenden Datei (Einstellungen → Excel importieren oder `networth import`).
-* **Spalten konfigurierbar**: Eingabe-, Formel- und Textspalten anlegen, umbenennen, verschieben, löschen.
+* **Konten & Kennzahlen** statt Spalten-Konfiguration: Konten in Gruppen anlegen und per Drag & Drop sortieren,
+  die Summe rechnet automatisch, Kennzahlen aus einem Katalog oder als eigene Formel.
 * **Mehrbenutzerfähig**: Registrierung mit Benutzername und Passwort, jedes Konto hat eigene, getrennte Daten
-  (Einträge, Spalten, Einkommen, Einstellungen). Login per Session-Cookie, HTTP Basic Auth für Skripte.
+  (Einträge, Konten, Einkommen, Einstellungen). Login per Session-Cookie, HTTP Basic Auth für Skripte.
 * **Administratoren** verwalten unter *Benutzer* die Konten: anlegen, löschen (inkl. aller Daten), Passwort
   zurücksetzen, Admin-Rechte vergeben/entziehen und die Selbst-Registrierung öffnen oder schließen.
 * **SQLite** als einzige Datenbank, gespeichert im gemounteten Ordner.
@@ -93,33 +94,48 @@ docker compose pull && docker compose up -d
 Hinter einem Reverse-Proxy mit HTTPS `NWT_SECURE_COOKIES=true` setzen; unter einem Unterpfad zusätzlich
 `NWT_ROOT_PATH=/networth`. Alle Variablen stehen in [.env.example](.env.example).
 
-## Spalten
+## Konten & Kennzahlen
 
-Die Spalten sind **pro Benutzer** konfigurierbar, jedes Konto passt sie unabhängig von anderen an. Die erste Spalte
-ist immer `Datum`. Der erste Administrator startet mit dem Layout der bisherigen `NetWorth.xlsx`, neue Benutzer mit
-einem schlanken Layout (Girokonto, Sparkonto, Kreditkarte, Depot, Summe, Kommentar). Unter *Spalten → Spalten
-zurücksetzen* lässt sich jederzeit eines der beiden Layouts übernehmen; Spalten mit gleichem Namen behalten ihre Werte.
+Jeder Benutzer richtet unter *Konten & Kennzahlen* ein, was er erfasst – unabhängig von anderen Konten. Der erste
+Administrator startet mit dem Layout der bisherigen `NetWorth.xlsx`, neue Benutzer mit einem schlanken Layout
+(Girokonto, Sparkonto, Kreditkarte, Depot). Unter *Zurücksetzen* lässt sich jederzeit eines der beiden Layouts
+übernehmen; Felder mit gleichem Namen behalten ihre Werte.
 
-| Typ     | Bedeutung |
-|---------|-----------|
-| Eingabe | Betrag pro Eintrag (Kontostand, …) |
-| Formel  | berechnet, z. B. `{Flatex Depot}-{Depot Entwicklung}` |
-| Text    | freier Text, z. B. Kommentar |
+**Konten** liegen in Gruppen (z. B. Konten, Depot, Vorsorge). Die Reihenfolge der Gruppen und Konten gilt überall:
+im Eintragsformular, im Excel und im Vermögens-Chart (erste Gruppe unten). Konten lassen sich mit der Maus in eine
+andere Position oder Gruppe ziehen, alternativ mit ↑/↓.
 
-Formeln verweisen mit `{Spalte}` auf Werte desselben Eintrags, mit `{Spalte@prev}` auf den vorherigen und mit
-`{Spalte@first}` auf den ersten Eintrag. `SUM({Girokonto}:{Flatex Geld})` summiert alle Spalten dazwischen
-(Spaltenreihenfolge wie im Excel). Funktionen: `IF`, `SUM`, `MIN`, `MAX`, `ABS`, `ROUND`. Im Excel-Export wird
-daraus eine normale Formel (`=SUM(B5:F5)`). Umbenennen einer Spalte passt alle Formeln an.
+| Art            | Bedeutung |
+|----------------|-----------|
+| Guthaben       | Kontostand, zählt zum Vermögen |
+| Schulden       | z. B. Kreditkarte, gehört zu einem Konto und wird damit verrechnet (Betrag negativ eintragen) |
+| Depot          | Wert und Gewinn (Depot-Entwicklung) werden eingetragen, die Kapitalertragsteuer wird berechnet |
+| Sonstiger Wert | wird erfasst, zählt aber nicht zum Vermögen |
 
-Für das Dashboard:
+**Automatisch berechnet**: die *Summe* ist immer die Summe aller Konten (abzüglich der Kapitalertragsteuer), neue
+Konten zählen sofort mit. Die *Kapitalertragsteuer* ist der eingestellte Prozentsatz (Standard 27,5 %) vom
+positiven Depot-Gewinn.
 
-* **Anlagegruppe**: Konto wird im Vermögens-Chart in dieser Gruppe gestapelt (Reihenfolge unter *Einstellungen*).
-* **Rolle**: `Summe` (Gesamtvermögen), `Depotwert`, `Depot-Entwicklung`, `KESt`, `Kommentar`.
-* **Verrechnen mit**: z. B. Kreditkarte wird mit dem Girokonto verrechnet.
+**Kennzahlen** kommen aus einem Katalog: Veränderung zum vorigen bzw. ersten Eintrag (% oder €), Summe oder Anteil
+ausgewählter Konten, Depot-Kennzahlen (eingezahltes Kapital, Gewinn nach Steuer, Gewinnanteil). Für alles andere
+gibt es *Eigene Formel*: `{Spalte}` verweist auf einen Wert desselben Eintrags, `{Spalte@prev}` auf den vorherigen,
+`{Spalte@first}` auf den ersten Eintrag. Funktionen: `IF`, `SUM`, `MIN`, `MAX`, `ABS`, `ROUND`. Im Excel-Export wird
+daraus eine normale Formel (`=B5+C5`). Umbenennen passt alle Formeln an, gelöschte Konten fallen aus Summen und
+Anteilen heraus.
 
-Beim Import werden Formelzellen, deren Wert von der aktuellen Formel abweicht (z. B. alte Zeilen mit einer
-anderen Formel oder leere Zellen), als **Festwert** übernommen, damit das Excel unverändert bleibt. Festwerte sind
-in der Eintragsliste kursiv und können im Eintrag auf die Formel zurückgesetzt werden.
+**Textfelder**: der Kommentar jedes Eintrags (Anmerkungen im Chart) und beliebige weitere Notizfelder.
+
+Spaltenbreite und bedingte Formatierung („Hervorhebung“) fürs Excel stehen bei jedem Feld unter *Erweitert*.
+
+Beim Import werden unbekannte Zahlenspalten als *sonstiger Wert* angelegt (die Summe bleibt unverändert) und
+können danach zu einem Konto gemacht werden. Formelzellen, deren Wert von der aktuellen Formel abweicht (z. B. alte
+Zeilen mit einer anderen Formel oder leere Zellen), werden als **Festwert** übernommen, damit das Excel unverändert
+bleibt. Festwerte sind in der Eintragsliste kursiv und können im Eintrag auf die Formel zurückgesetzt werden.
+
+**Umstellung bestehender Daten:** Spalten aus früheren Versionen werden beim ersten Start automatisch zu Konten,
+Kennzahlen und Textfeldern. Bereiche wie `SUM({A}:{C})` werden dabei in einzelne Verweise aufgelöst. Weicht die
+bisherige Summe oder Steuerformel von der automatischen Berechnung ab, bleibt sie als eigene Formel „… (alt)“
+erhalten und die Seite *Konten & Kennzahlen* zeigt einen Hinweis.
 
 ## Entwicklung
 
@@ -138,6 +154,7 @@ poetry run networth import --user admin data/example_NetWorth.xlsx
 
 **Keine echten Daten einchecken** – `data/`, `*.xlsx`, `*.sqlite` und `.env` sind in `.gitignore`.
 
-Struktur (`src/networth/`): `formula.py` (Formelsprache), `columns.py` (Spaltenkonfiguration, Standardlayout),
+Struktur (`src/networth/`): `formula.py` (Formelsprache), `columns.py` (Spalten, Abhängigkeiten),
+`structure.py` (Konten, Kennzahlen, Textfelder → Spalten; Standardlayouts, Umstellung),
 `db.py` (SQLite), `sheet.py` (Berechnung), `excel.py` (Import/Export), `dashboard.py` (Plotly-Dashboard),
 `app.py` (FastAPI-Weboberfläche), `auth.py`, `users.py` (Konten, Datenbank je Benutzer), `cli.py`.

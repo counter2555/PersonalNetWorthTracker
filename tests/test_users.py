@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from networth.app import create_app
 from networth.auth import ensure_configured
-from networth.columns import default_columns
+from networth.structure import default_columns
 from networth.db import Store
 from networth.users import UserError, Users
 
@@ -145,15 +145,15 @@ def test_columns_per_user(app, users, store):
     jane = users.store(users.by_name("jane").id)
     admin_columns = [c.name for c in store.columns()]
 
-    client.post("/columns/new", data={"name": "Krypto", "kind": "input", "number_format": "currency", "width": "12"})
+    client.post("/columns/new", data={"name": "Krypto", "spec": "asset", "group": "Konten"})
     giro = next(c for c in jane.columns() if c.name == "Girokonto")
-    client.post(f"/columns/{giro.id}", data={"name": "Hauptkonto", "number_format": "currency", "width": "12",
-                                             "asset_group": giro.asset_group, "role": giro.role})
-    kommentar = next(c for c in jane.columns() if c.name == "Kommentar")
-    client.post(f"/columns/{kommentar.id}/delete")
+    client.post(f"/columns/{giro.id}", data={"name": "Hauptkonto", "spec": "asset", "group": giro.asset_group})
+    sparkonto = next(c for c in jane.columns() if c.name == "Sparkonto")
+    client.post(f"/columns/{sparkonto.id}/delete")
 
     names = [c.name for c in jane.columns()]
-    assert "Krypto" in names and "Hauptkonto" in names and "Girokonto" not in names and "Kommentar" not in names
+    assert "Krypto" in names and "Hauptkonto" in names and "Girokonto" not in names and "Sparkonto" not in names
+    assert next(c for c in jane.columns() if c.name == "Kreditkarte").net_into == "Hauptkonto"
     assert [c.name for c in store.columns()] == admin_columns  # the admin's columns are untouched
     admin = client_for(app, "tester", "test-password")
     page = admin.get("/columns").text
@@ -178,7 +178,7 @@ def test_reset_columns(app, users, store):
     assert "bestätigen" in client.post("/columns/reset", data={"layout": "basic"}).text
 
     response = client.post("/columns/reset", data={"layout": "basic", "confirm": "yes"})
-    assert "Spalten zurückgesetzt" in response.text and "Bundesschatz" in response.text
+    assert "Zurückgesetzt" in response.text and "Bundesschatz" in response.text
     names = [c.name for c in store.columns()]
     assert "Bundesschatz" not in names and "Depot" in names
     assert store.group_order() == ["Konten", "Depot"]
@@ -200,13 +200,11 @@ def test_forms_of_another_user_are_refused(app, users, store):
 
     client.post("/register", data={"username": "lea", "password": "secret-pass", "password2": "secret-pass"})
     lea = users.store(users.by_name("lea").id)
-    response = client.post("/columns/new", data={"name": "Fremd", "kind": "input", "number_format": "currency",
-                                                 "as_user": str(tester.id)})
+    response = client.post("/columns/new", data={"name": "Fremd", "spec": "asset", "as_user": str(tester.id)})
     assert "Nicht gespeichert" in response.text and "„lea“" in response.text
     assert "Fremd" not in [c.name for c in lea.columns() + store.columns()]
 
-    client.post("/columns/new", data={"name": "Eigene", "kind": "input", "number_format": "currency",
-                                      "as_user": str(users.by_name("lea").id)})
+    client.post("/columns/new", data={"name": "Eigene", "spec": "asset", "as_user": str(users.by_name("lea").id)})
     assert "Eigene" in [c.name for c in lea.columns()]
     assert client.post("/income", data={"date": "2024-01-31", "amount": "1"}).status_code == 200  # scripts
     assert len(lea.income()) == 1

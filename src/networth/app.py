@@ -1,10 +1,12 @@
-"""Web service: data entry, column configuration, Excel import/export and the dashboard."""
+"""Web service: data entry, accounts and metrics, Excel import/export and the dashboard."""
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
 import html
+import json
 import threading
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -19,11 +21,15 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import achievements, dashboard, income_dashboard
 from . import formula as fx
 from .auth import current_user, ensure_configured
-from .columns import DATE_COLUMN, FORMATS, KINDS, LAYOUTS, ROLES, Column, Layout, form_sections
+from .columns import DATE_COLUMN, FORMATS, Column, Layout, form_sections
 from .config import Config
 from .db import Cell, Entry, Income, Store
 from .excel import export_workbook, import_workbook
 from .sheet import compute, to_frame
+from .structure import (ACCOUNT_SPECS, AUTOMATIC, DEFAULT_NAMES, DEPOT_METRICS, KIND_OF, LAYOUTS, MEMBER_METRICS,
+                        METRICS, OTHER_GROUP, SPECS, TEXT_SPECS, TOP_ACCOUNTS, member_candidates, member_formula,
+                        members,
+                        overview, spec_of)
 from .users import User, UserError, Users
 
 HERE = Path(__file__).parent
@@ -35,8 +41,9 @@ DEFAULT_PAGE_SIZE = 50
 
 NAV = [("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/achievements", "Erfolge"),
        ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
-       ("/columns", "Spalten"), ("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]
+       ("/columns", "Konten & Kennzahlen"), ("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]
 ADMIN_NAV = [("/admin/users", "Benutzer")]
+NEW_GROUP = "__new__"  # account form: option "new group"
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +79,26 @@ def format_date(value: dt.date) -> str:
     return value.strftime("%d.%m.%Y")
 
 
+def format_rate(value: float) -> str:
+    """Tax rate for an input field: 0.275 -> "27,5"."""
+    return f"{value * 100:.4f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _width(form: dict[str, str]) -> float:
+    """Excel column width from a form; empty = automatic (0)."""
+    try:
+        return float(fx.normalize_number_input(form.get("width", "") or "0"))
+    except ValueError:
+        return 0.0
+
+
+def _rate(text: str) -> float:
+    value, _ = fx.parse_number_input(text.replace("%", ""))
+    if value is None or not 0 <= value < 100:
+        raise ValueError("Steuersatz in Prozent angeben, z. B. 27,5")
+    return value / 100
+
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -105,8 +132,9 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
                         "error")
     app.state.config, app.state.users = config, users
     templates = Jinja2Templates(directory=HERE / "templates")
-    templates.env.filters.update(value=format_value, date=format_date, input=format_input)
-    templates.env.globals.update(NAV=NAV, LAYOUTS=LAYOUTS, KINDS=KINDS, FORMATS=FORMATS, ROLES=ROLES, DATE_COLUMN=DATE_COLUMN,
+    templates.env.filters.update(value=format_value, date=format_date, input=format_input, rate=format_rate)
+    templates.env.globals.update(NAV=NAV, LAYOUTS=LAYOUTS, FORMATS=FORMATS, SPECS=SPECS, ACCOUNT_SPECS=ACCOUNT_SPECS,
+                                 METRICS=METRICS, NEW_GROUP=NEW_GROUP, DATE_COLUMN=DATE_COLUMN,
                                  auth_enabled=not config.auth_disabled, THEME_CSS=dashboard.THEME_CSS,
                                  THEME_INIT_JS=dashboard.THEME_INIT_JS, THEME_SWITCH_JS=dashboard.THEME_SWITCH_JS,
                                  THEME_SWITCH_HTML=dashboard.THEME_SWITCH_HTML)
@@ -283,7 +311,7 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
         except Exception as exc:  # a broken column configuration must not lock the user out of the UI
             return page(request, "message.html", status_code=500, title="Dashboard-Fehler",
                         message=f"Das Dashboard konnte nicht erstellt werden: {exc}. "
-                                "Prüfe die Rollen und Anlagegruppen unter „Spalten“.")
+                                "Prüfe die Einstellungen unter „Konten & Kennzahlen“.")
         if content is None:
             return page(request, "message.html", title="Noch keine Daten",
                         message="Lege den ersten Eintrag an oder importiere dein Excel unter „Einstellungen“.")
@@ -450,21 +478,99 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
         data(request).delete_income(income_id)
         return redirect(request, "/income", "Eintrag gelöscht")
 
-    # -- columns ------------------------------------------------------------
+    # -- accounts, metrics and text fields ("columns") ---------------------
 
     @app.get("/columns", response_class=HTMLResponse)
     def columns_list(request: Request):
-        return page(request, "columns.html", columns=data(request).columns())
+        store = data(request)
+        return page(request, "columns.html", overview=overview(store.columns(), store.group_order()),
+                    tax_rate=store.tax_rate(), notes=store.structure_notes())
 
-    def column_form(request: Request, col: Column, error: str | None = None, status_code: int = 200):
-        columns = data(request).columns()
-        groups = sorted({c.asset_group for c in columns if c.asset_group} | set(data(request).group_order()))
-        return page(request, "column_form.html", status_code=status_code, col=col, columns=columns,
-                    groups=groups, error=error)
+    def column_form(request: Request, col: Column, error: str | None = None, status_code: int = 200,
+                    gain_name: str = "", tax_rate: float | None = None):
+        store = data(request)
+        columns = store.columns()
+        spec = spec_of(col)
+        context = dict(col=col, spec=spec, columns=columns, error=error,
+                       tax_rate=store.tax_rate() if tax_rate is None else tax_rate)
+        if spec in ACCOUNT_SPECS:
+            gain = next((c for c in columns if c.spec == "depot_gain"), None)
+            depot = next((c for c in columns if c.spec == "depot"), None)
+            return page(request, "account_form.html", status_code=status_code, groups=store.group_order(),
+                        targets=[c for c in columns if c.spec in TOP_ACCOUNTS and c.id != col.id],
+                        has_other_depot=depot is not None and depot.id != col.id,
+                        gain_name=gain_name or (gain.name if gain else DEFAULT_NAMES["depot_gain"]), **context)
+        if spec in TEXT_SPECS:
+            return page(request, "field_form.html", status_code=status_code, **context)
+        has_depot = any(c.spec == "depot" for c in columns)
+        return page(request, "metric_form.html", status_code=status_code,
+                    candidates=[c for c in member_candidates(columns) if c.id != col.id],
+                    selected=set(members(col)) if spec in MEMBER_METRICS else set(),
+                    metrics={k: v for k, v in METRICS.items() if has_depot or k not in DEPOT_METRICS},
+                    references=[c for c in columns if c.is_number and c.id != col.id], **context)
+
+    def find_column(request: Request, column_id: int) -> Column:
+        col = next((c for c in data(request).columns() if c.id == column_id), None)
+        if col is None:
+            raise HTTPException(404)
+        return col
 
     @app.get("/columns/new", response_class=HTMLResponse)
-    def column_new(request: Request):
-        return column_form(request, Column(name=""))
+    def column_new(request: Request, type: str = "account", group: str = ""):
+        if type == "metric":
+            return column_form(request, Column(name="", kind="formula", spec="change_prev", width=0))
+        if type == "note":
+            return column_form(request, Column(name="", kind="text", spec="note", width=0))
+        return column_form(request, Column(name="", spec="asset", asset_group=group, width=0))
+
+    @app.get("/columns/{column_id}", response_class=HTMLResponse)
+    def column_edit(request: Request, column_id: int):
+        col = find_column(request, column_id)
+        if col.spec == "depot_gain":  # edited together with the depot
+            depot = next(c for c in data(request).columns() if c.spec == "depot")
+            return RedirectResponse(f"{_root(request)}/columns/{depot.id}", status_code=303)
+        return column_form(request, col)
+
+    async def save_column_from_form(request: Request, column_id: int | None):
+        form = await request.form()
+        values = {k: str(v).strip() for k, v in form.items()}
+        existing = find_column(request, column_id) if column_id else None
+        spec = values.get("spec") or (spec_of(existing) if existing else "asset")
+        if existing is not None and spec_of(existing) in AUTOMATIC | {"comment"}:
+            spec = spec_of(existing)  # fixed fields keep their kind
+        if spec not in SPECS or spec in AUTOMATIC | {"comment"} and existing is None:
+            spec = "asset"
+        base = existing or Column(name="")
+        col = replace(base, name=values.get("name", ""), spec=spec, kind=KIND_OF[spec], width=_width(values),
+                      highlight=values.get("highlight", base.highlight))
+        tax_rate = gain_name = None
+        if spec in ACCOUNT_SPECS:
+            group = values.get("new_group", "") if values.get("group") == NEW_GROUP else values.get("group", "")
+            if not group and spec in TOP_ACCOUNTS and values.get("group") != NEW_GROUP:  # e.g. scripts
+                group = next(iter(data(request).group_order()), OTHER_GROUP)
+            col = replace(col, asset_group=group, net_into=values.get("net_into", ""),
+                          number_format=values.get("number_format", "currency") if spec == "value" else "currency")
+            gain_name = values.get("gain_name", "") if spec == "depot" else None
+        elif spec in MEMBER_METRICS:
+            col = replace(col, formula=member_formula([str(m) for m in form.getlist("members")]))
+        elif spec == "custom":
+            col = replace(col, formula=values.get("formula", ""), number_format=values.get("number_format", "currency"))
+        try:
+            if spec in ("depot", "tax") and "tax_rate" in values:
+                tax_rate = _rate(values["tax_rate"])
+            saved = data(request).save_column(col, tax_rate=tax_rate)
+            if gain_name:
+                gain = next(c for c in data(request).columns() if c.spec == "depot_gain")
+                if gain.name != gain_name:
+                    data(request).save_column(replace(gain, name=gain_name))
+        except (ValueError, fx.FormulaError) as exc:
+            return column_form(request, col, error=str(exc), status_code=422, gain_name=gain_name or "",
+                               tax_rate=tax_rate)
+        return redirect(request, "/columns", f"„{saved.name}“ gespeichert")
+
+    @app.post("/columns/new")
+    async def column_create(request: Request):
+        return await save_column_from_form(request, None)
 
     @app.post("/columns/reset")
     async def columns_reset(request: Request):
@@ -473,44 +579,23 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
         if layout not in LAYOUTS or form.get("confirm") != "yes":
             return redirect(request, "/columns", "Bitte ein Layout wählen und das Löschen bestätigen", "error")
         removed = data(request).reset_columns(layout)
-        return redirect(request, "/columns", "Spalten zurückgesetzt"
-                        + (f"; gelöscht: {', '.join(removed)}" if removed else ""))
+        return redirect(request, "/columns", "Zurückgesetzt" + (f"; gelöscht: {', '.join(removed)}" if removed else ""))
 
-    @app.get("/columns/{column_id}", response_class=HTMLResponse)
-    def column_edit(request: Request, column_id: int):
-        col = next((c for c in data(request).columns() if c.id == column_id), None)
-        if col is None:
-            raise HTTPException(404)
-        return column_form(request, col)
-
-    async def save_column_from_form(request: Request, column_id: int | None):
-        form = {k: str(v).strip() for k, v in (await request.form()).items()}
-        existing = next((c for c in data(request).columns() if c.id == column_id), None) if column_id else None
+    @app.post("/columns/order")
+    async def columns_order(request: Request):
+        """Drag and drop: ``order`` is ``[[group, [account ids]], ...]`` in the new order."""
+        form = await request.form()
         try:
-            width = float(fx.normalize_number_input(form.get("width", "") or "12"))
-        except ValueError:
-            width = 12.0
-        col = Column(
-            id=column_id,
-            name=form.get("name", ""),
-            kind=existing.kind if existing else form.get("kind", "input"),
-            formula=form.get("formula", "") if (existing.kind if existing else form.get("kind")) == "formula" else "",
-            number_format=form.get("number_format", "currency"),
-            width=width,
-            asset_group=form.get("asset_group", ""),
-            role=form.get("role", ""),
-            net_into=form.get("net_into", ""),
-            highlight=form.get("highlight", ""),
-        )
-        try:
-            data(request).save_column(col)
-        except (ValueError, fx.FormulaError) as exc:
-            return column_form(request, col, error=str(exc), status_code=422)
-        return redirect(request, "/columns", f"Spalte „{col.name}“ gespeichert")
+            order = {str(group): [int(i) for i in ids] for group, ids in json.loads(str(form.get("order", "")))}
+            data(request).order_accounts(order)
+        except (ValueError, TypeError) as exc:
+            return redirect(request, "/columns", f"Nicht verschoben: {exc}", "error")
+        return redirect(request, "/columns")
 
-    @app.post("/columns/new")
-    async def column_create(request: Request):
-        return await save_column_from_form(request, None)
+    @app.post("/columns/notes/dismiss")
+    def columns_notes_dismiss(request: Request):
+        data(request).dismiss_structure_notes()
+        return redirect(request, "/columns")
 
     @app.post("/columns/{column_id}")
     async def column_update(request: Request, column_id: int):
@@ -519,18 +604,37 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
     @app.post("/columns/{column_id}/delete")
     def column_delete(request: Request, column_id: int):
         try:
-            data(request).delete_column(column_id)
+            deleted = data(request).delete_column(column_id)
         except (ValueError, StopIteration) as exc:
             return redirect(request, "/columns", f"Nicht gelöscht: {exc}", "error")
-        return redirect(request, "/columns", "Spalte gelöscht")
+        return redirect(request, "/columns", f"Gelöscht: {', '.join(deleted)}")
 
     @app.post("/columns/{column_id}/move")
     async def column_move(request: Request, column_id: int):
         form = await request.form()
         try:
             data(request).move_column(column_id, int(str(form.get("offset", "0"))))
-        except ValueError as exc:
+        except (ValueError, StopIteration) as exc:
             return redirect(request, "/columns", f"Nicht verschoben: {exc}", "error")
+        return redirect(request, "/columns")
+
+    @app.post("/groups/{action}")
+    async def group_action(request: Request, action: str):
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        store, group = data(request), form.get("group", "")
+        try:
+            if action == "new":
+                store.add_group(form.get("name", ""))
+            elif action == "rename":
+                store.rename_group(group, form.get("name", ""))
+            elif action == "move":
+                store.move_group(group, int(form.get("offset", "0")))
+            elif action == "delete":
+                store.delete_group(group)
+            else:
+                raise HTTPException(404)
+        except ValueError as exc:
+            return redirect(request, "/columns", f"Nicht gespeichert: {exc}", "error")
         return redirect(request, "/columns")
 
     # -- settings, import, export ------------------------------------------
@@ -548,9 +652,8 @@ def create_app(config: Config | None = None, users: Users | None = None) -> Fast
                 raise fx.FormulaError("Ziel muss größer als 0 sein")
         except fx.FormulaError as exc:
             return redirect(request, "/settings", f"Nicht gespeichert: {exc}", "error")
-        groups = ", ".join(g.strip() for g in str(form.get("group_order", "")).split(",") if g.strip())
-        data(request).set_settings({"target": str(target), "group_order": groups,
-                            "show_distribution": "1" if form.get("show_distribution") else "0"})
+        data(request).set_settings({"target": str(target),
+                                    "show_distribution": "1" if form.get("show_distribution") else "0"})
         return redirect(request, "/settings", "Einstellungen gespeichert")
 
     @app.post("/import")

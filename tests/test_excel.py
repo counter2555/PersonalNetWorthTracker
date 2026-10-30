@@ -42,9 +42,9 @@ def test_export_has_original_layout_and_cached_values(store, example_xlsx):
     assert wb.sheetnames == ["Net Worth", "Income"]
     ws = wb["Net Worth"]
     headers = [c.value for c in ws[1]]
-    assert headers[:3] == ["Datum", "Girokonto", "Sparkonto"] and headers[-1] == "Kommentar"
+    assert headers[:4] == ["Datum", "Girokonto", "Kreditkarte", "Sparkonto"] and headers[-1] == "Kommentar"
     summe = headers.index("Summe") + 1
-    assert ws.cell(2, summe).value == "=SUM(B2:G2)+SUM(L2:O2)+J2"
+    assert ws.cell(2, summe).value == "=B2+C2+D2+E2+F2+G2+I2+J2+K2+L2+M2"  # all accounts and the tax
     assert ws.cell(2, 2).number_format == '"€"\\ #,##0.00'
 
     # pandas (and the old visualize_net_worth.py) read the cached formula results
@@ -75,6 +75,7 @@ def test_roundtrip_keeps_expressions_and_fixed_values(store, example_xlsx, tmp_p
     exported = tmp_path / "exported.xlsx"
     exported.write_bytes(_export(store))
     ws = openpyxl.load_workbook(exported)["Net Worth"]
+    headers = [c.value for c in ws[1]]
     assert ws.cell(3, headers.index("Sparkonto") + 1).value == "=5000+12.5"
     assert ws.cell(4, headers.index("Summe") + 1).value == 123.45
 
@@ -95,14 +96,19 @@ def test_unknown_columns_are_added(store, example_xlsx, tmp_path):
     assert [c.name for c in result.new_columns] == ["Krypto"]
     assert result.income is None
     krypto = next(c for c in store.columns() if c.name == "Krypto")
+    assert krypto.spec == "value"  # not part of the net worth until the user makes it an account
     assert all(e.cells[krypto.id].value == 100.0 for e in store.entries())
+    summe = next(c for c in store.columns() if c.spec == "total")
+    assert not any(e.cells.get(summe.id) for e in store.entries())  # the total is unchanged: no fixed values
 
 
 def test_new_formula_column_and_dashboard(store, example_xlsx):
     _import(store, example_xlsx)
     store.save_column(Column(name="Krypto", asset_group="Krypto"))
     col = store.save_column(Column(name="Summe ohne Vorsorge", kind="formula",
-                                   formula="{Summe}-SUM({Bausparer}:{Allianz Vorsorgekasse})"))
+                                   formula="{Summe}-SUM({Bausparer},{Bundespensionskasse},{Allianz Vorsorgekasse})"))
+    with pytest.raises(ValueError, match="Bereiche"):  # ranges depended on the column order
+        store.save_column(Column(name="Bereich", kind="formula", formula="SUM({Bausparer}:{Bundesschatz})"))
     columns, entries = store.columns(), store.entries()
     rows = compute(columns, entries)
     assert rows[-1].values[col.name] == pytest.approx(
@@ -118,11 +124,14 @@ def test_rename_updates_formulas(store):
     giro.name = "Giro"
     store.save_column(giro)
     by_name = {c.name: c for c in store.columns()}
-    assert by_name["Summe"].formula.startswith("SUM({Giro}:{Flatex Depot})")
+    assert by_name["Summe"].formula.startswith("{Giro}+{Kreditkarte}+")
+    assert "{Giro}" in by_name["Summe Geld"].formula
     assert by_name["Kreditkarte"].net_into == "Giro"
 
 
 def test_delete_referenced_column_is_refused(store):
-    kest = next(c for c in store.columns() if c.name == "Kest")
-    with pytest.raises(ValueError, match="verwendet"):
-        store.delete_column(kest.id)
+    by_name = {c.name: c for c in store.columns()}
+    with pytest.raises(ValueError, match="verwendet von: Kreditkarte"):  # the debts booked against it
+        store.delete_column(by_name["Girokonto"].id)
+    with pytest.raises(ValueError, match="fest dazu"):
+        store.delete_column(by_name["Kest"].id)

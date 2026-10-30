@@ -1,7 +1,8 @@
 import pytest
 
 from networth import formula as fx
-from networth.columns import Column, default_columns, evaluation_order, validate
+from networth.columns import Column, evaluation_order, validate
+from networth.structure import default_columns
 from networth.excel import excel_formula
 
 
@@ -32,10 +33,11 @@ def test_excel_translation_matches_original_sheet():
     letters = {c.name: chr(ord("A") + c.position) if c.position < 26 else "A" + chr(ord("A") + c.position - 26)
                for c in default_columns()}
     by_name = {c.name: c for c in default_columns()}
-    assert excel_formula(by_name["Summe"].parsed, letters, 493) == "SUM(B493:G493)+SUM(L493:O493)+J493"
+    assert excel_formula(by_name["Summe"].parsed, letters, 493) == \
+        "B493+C493+D493+E493+F493+G493+I493+J493+K493+L493+M493"
     assert excel_formula(by_name["Kest"].parsed, letters, 493) == "IF(H493>0,-H493*0.275,0)"
-    assert excel_formula(by_name["Änderung seit Start"].parsed, letters, 7) == "(P7-$P$2)/$P$2"
-    assert excel_formula(by_name["Änderung Gesamt"].parsed, letters, 7) == "(P7-P6)/P6"
+    assert excel_formula(by_name["Änderung seit Start"].parsed, letters, 7) == "(N7-$N$2)/$N$2"
+    assert excel_formula(by_name["Änderung Gesamt"].parsed, letters, 7) == "(N7-N6)/N6"
 
 
 def test_parse_errors():

@@ -1,51 +1,169 @@
 {% extends "base.html" %}
-{% block title %}Spalten · Net Worth{% endblock %}
-{% block main_class %}wide{% endblock %}
+{% block title %}Konten & Kennzahlen · Net Worth{% endblock %}
+{% macro move(col, first, last) %}
+  <form method="post" action="{{ root }}/columns/{{ col.id }}/move" class="inline"><input type="hidden" name="offset" value="-1">
+    <button type="submit" class="small" title="nach oben" {% if first %}disabled{% endif %}>↑</button></form>
+  <form method="post" action="{{ root }}/columns/{{ col.id }}/move" class="inline"><input type="hidden" name="offset" value="1">
+    <button type="submit" class="small" title="nach unten" {% if last %}disabled{% endif %}>↓</button></form>
+{% endmacro %}
 {% block content %}
-<div class="actions" style="margin-bottom: 12px">
-  <h1 style="margin: 0 auto 0 0">Spalten</h1>
-  <a class="button" href="{{ root }}/columns/new">+ Neue Spalte</a>
+<h1>Konten & Kennzahlen</h1>
+{% if notes %}
+<div class="flash">
+  <strong>Deine Spalten wurden auf Konten und Kennzahlen umgestellt.</strong> Bitte prüfe:
+  <ul>{% for note in notes %}<li>{{ note }}</li>{% endfor %}</ul>
+  <form method="post" action="{{ root }}/columns/notes/dismiss"><button type="submit" class="small">Verstanden, ausblenden</button></form>
 </div>
-<p class="hint">Reihenfolge = Spalten im Excel. Die erste Spalte ist immer „{{ DATE_COLUMN }}“.
-  Anlagegruppe und Rolle steuern das Dashboard.
-  {% if auth_enabled %}Die Spalten gelten nur für dein Konto – andere Benutzer haben ihre eigene Konfiguration.{% endif %}</p>
-<div class="table-wrap">
-<table>
-  <thead><tr><th>Name</th><th class="text">Typ</th><th class="text">Formel</th><th class="text">Format</th>
-    <th class="text">Anlagegruppe</th><th class="text">Rolle / verrechnet mit</th><th>Reihenfolge</th><th></th></tr></thead>
-  <tbody>
-  {% for col in columns %}
-    <tr>
-      <td><a href="{{ root }}/columns/{{ col.id }}">{{ col.name }}</a></td>
-      <td class="text">{{ KINDS[col.kind] }}</td>
-      <td class="wrap"><code>{{ col.formula }}</code></td>
-      <td class="text">{{ FORMATS[col.number_format] if col.kind != 'text' else '' }}</td>
-      <td class="text">{{ col.asset_group }}</td>
-      <td class="text">{{ ROLES.get(col.role, '') }}{% if col.net_into %}→ {{ col.net_into }}{% endif %}</td>
-      <td>
-        <form method="post" action="{{ root }}/columns/{{ col.id }}/move" class="inline"><input type="hidden" name="offset" value="-1">
-          <button type="submit" class="small" title="nach oben" {% if loop.first %}disabled{% endif %}>↑</button></form>
-        <form method="post" action="{{ root }}/columns/{{ col.id }}/move" class="inline"><input type="hidden" name="offset" value="1">
-          <button type="submit" class="small" title="nach unten" {% if loop.last %}disabled{% endif %}>↓</button></form>
-      </td>
-      <td><a class="button small" href="{{ root }}/columns/{{ col.id }}">Bearbeiten</a></td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+{% endif %}
+<p class="hint">Die Reihenfolge hier gilt überall: im Eintragsformular, im Excel und im Vermögens-Chart (erste Gruppe unten).
+  Konten lassen sich mit der Maus in eine andere Position oder Gruppe ziehen.
+  {% if auth_enabled %}Die Einstellungen gelten nur für dein Konto.{% endif %}</p>
 
-<form method="post" action="{{ root }}/columns/reset" class="card stack" style="margin-top: 16px"
-      onsubmit="return confirm('Spalten wirklich auf das Standardlayout zurücksetzen?')">
-  <h2>Spalten zurücksetzen</h2>
-  <p class="hint">Ersetzt deine Spalten durch ein Standardlayout. Spalten mit gleichem Namen und Typ behalten ihre Werte,
-    <strong>alle anderen Spalten werden samt ihren Werten gelöscht.</strong></p>
+<section class="card">
+  <div class="actions heading">
+    <h2>Konten</h2>
+    <form method="post" action="{{ root }}/groups/new" class="actions">
+      <input name="name" placeholder="Neue Gruppe" aria-label="Name der neuen Gruppe" required>
+      <button type="submit" class="small">+ Gruppe</button>
+    </form>
+  </div>
+  {% for group, items in overview.groups %}
+  <div class="group" data-group="{{ group }}">
+    <div class="actions group-head">
+      <h3>{{ group }}</h3>
+      <form method="post" action="{{ root }}/groups/move" class="inline"><input type="hidden" name="group" value="{{ group }}">
+        <input type="hidden" name="offset" value="-1"><button type="submit" class="small" title="Gruppe nach oben" {% if loop.first %}disabled{% endif %}>↑</button></form>
+      <form method="post" action="{{ root }}/groups/move" class="inline"><input type="hidden" name="group" value="{{ group }}">
+        <input type="hidden" name="offset" value="1"><button type="submit" class="small" title="Gruppe nach unten" {% if loop.last %}disabled{% endif %}>↓</button></form>
+      <details class="inline-edit">
+        <summary class="button small">Umbenennen</summary>
+        <form method="post" action="{{ root }}/groups/rename" class="actions">
+          <input type="hidden" name="group" value="{{ group }}">
+          <input name="name" value="{{ group }}" aria-label="Neuer Name der Gruppe" required>
+          <button type="submit" class="small">OK</button>
+        </form>
+      </details>
+      {% if not items %}
+      <form method="post" action="{{ root }}/groups/delete" class="inline"><input type="hidden" name="group" value="{{ group }}">
+        <button type="submit" class="small danger">Gruppe löschen</button></form>
+      {% endif %}
+      <a class="button small" href="{{ root }}/columns/new?group={{ group | urlencode }}" style="margin-left: auto">+ Konto</a>
+    </div>
+    <ul class="items accounts">
+    {% for item in items %}
+      <li draggable="true" data-id="{{ item.account.id }}">
+        <span class="grip" aria-hidden="true">⋮⋮</span>
+        <a href="{{ root }}/columns/{{ item.account.id }}">{{ item.account.name }}</a>
+        {% if item.account.spec == 'depot' %}<span class="badge">Depot · Wert und {{ item.gain.name }}</span>{% endif %}
+        {% for debt in item.debts %}
+          <span class="badge">− <a href="{{ root }}/columns/{{ debt.id }}">{{ debt.name }}</a> (Schulden)</span>
+        {% endfor %}
+        <span class="item-actions">{{ move(item.account, loop.first, loop.last) }}</span>
+      </li>
+    {% else %}
+      <li class="empty hint">Noch keine Konten – hierher ziehen oder „+ Konto“.</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+  <form method="post" action="{{ root }}/columns/order" id="order-form" hidden><input type="hidden" name="order"></form>
+
+  {% if overview.values %}
+  <h3>Sonstige Werte <span class="hint">– werden erfasst, zählen aber nicht zum Vermögen</span></h3>
+  <ul class="items">
+  {% for col in overview.values %}
+    <li><a href="{{ root }}/columns/{{ col.id }}">{{ col.name }}</a>
+      <span class="item-actions">{{ move(col, loop.first, loop.last) }}</span></li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="actions heading">
+    <h2>Kennzahlen</h2>
+    <a class="button small" href="{{ root }}/columns/new?type=metric">+ Kennzahl</a>
+  </div>
+  <h3>Automatisch</h3>
+  <ul class="items">
+  {% for col in overview.automatic %}
+    <li><a href="{{ root }}/columns/{{ col.id }}">{{ col.name }}</a>
+      <span class="hint">{% if col.spec == 'total' %}Summe aller Konten{% if overview.depot %} abzüglich Kapitalertragsteuer{% endif %}
+        {% else %}{{ tax_rate | rate }} % vom positiven Gewinn von „{{ overview.depot.name }}“{% endif %}</span></li>
+  {% endfor %}
+  </ul>
+  {% if overview.metrics %}
+  <h3>Deine Kennzahlen</h3>
+  <ul class="items">
+  {% for col in overview.metrics %}
+    <li><a href="{{ root }}/columns/{{ col.id }}">{{ col.name }}</a>
+      <span class="hint">{{ METRICS[col.spec][0] }}{% if col.spec == 'custom' %}: <code>{{ col.formula }}</code>{% endif %}</span>
+      <span class="item-actions">{{ move(col, loop.first, loop.last) }}</span></li>
+  {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="actions heading">
+    <h2>Textfelder</h2>
+    <a class="button small" href="{{ root }}/columns/new?type=note">+ Notizfeld</a>
+  </div>
+  <ul class="items">
+  {% for col in overview.texts %}
+    <li><a href="{{ root }}/columns/{{ col.id }}">{{ col.name }}</a>
+      {% if col.spec == 'comment' %}<span class="hint">Kommentar zu jedem Eintrag, erscheint als Anmerkung im Chart</span>{% endif %}</li>
+  {% endfor %}
+  </ul>
+</section>
+
+<form method="post" action="{{ root }}/columns/reset" class="card stack"
+      onsubmit="return confirm('Wirklich auf das Standardlayout zurücksetzen?')">
+  <h2>Zurücksetzen</h2>
+  <p class="hint">Ersetzt Konten und Kennzahlen durch ein Standardlayout. Felder mit gleichem Namen behalten ihre Werte,
+    <strong>alle anderen werden samt ihren Werten gelöscht.</strong></p>
   <div class="fields">
     <label>Layout <select name="layout">
       {% for key, (label, _, _) in LAYOUTS.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
     </select></label>
   </div>
-  <label class="check"><input type="checkbox" name="confirm" value="yes" required> Nicht enthaltene Spalten und ihre Werte löschen</label>
+  <label class="check"><input type="checkbox" name="confirm" value="yes" required> Nicht enthaltene Felder und ihre Werte löschen</label>
   <div class="actions"><button type="submit" class="danger">Zurücksetzen</button></div>
 </form>
+{% endblock %}
+{% block scripts %}
+<script>
+// drag accounts within and between groups; the new order is saved right away
+(function () {
+  const form = document.getElementById("order-form");
+  let dragged = null;
+  const lists = () => Array.from(document.querySelectorAll(".group"));
+  document.querySelectorAll(".accounts li[draggable]").forEach(item => {
+    item.addEventListener("dragstart", event => {
+      dragged = item;
+      item.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+    });
+    item.addEventListener("dragend", () => item.classList.remove("dragging"));
+  });
+  document.querySelectorAll(".accounts").forEach(list => {
+    list.addEventListener("dragover", event => {
+      if (!dragged) return;
+      event.preventDefault();
+      const after = Array.from(list.querySelectorAll("li[draggable]:not(.dragging)"))
+        .find(li => event.clientY < li.getBoundingClientRect().top + li.offsetHeight / 2);
+      list.insertBefore(dragged, after || null);
+    });
+    list.addEventListener("drop", event => {
+      event.preventDefault();
+      if (!dragged) return;
+      dragged = null;
+      const order = lists().map(group => [group.dataset.group,
+        Array.from(group.querySelectorAll("li[draggable]")).map(li => Number(li.dataset.id))]);
+      form.elements.order.value = JSON.stringify(order);
+      form.submit();
+    });
+  });
+})();
+</script>
 {% endblock %}
