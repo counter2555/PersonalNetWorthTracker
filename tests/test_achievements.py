@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from networth.achievements import achievement, collect, recovered_drawdowns, streaks
+from networth.achievements import achievement, build_page, collect, recovered_drawdowns, streaks
 
 
 def test_unlocked_on_first_date_and_stays_unlocked():
@@ -33,3 +33,9 @@ def test_collect_without_net_worth_entries():
     assert by_title["Gutverdiener"].unlocked == pd.Timestamp("2024-01-31")
     assert by_title["Treue Seele"].value == 14
     assert "Notgroschen" not in by_title  # needs net worth entries
+
+
+def test_filters_can_hide_rows():
+    # .ach is a grid, which would override the browser's [hidden] rule and keep filtered rows visible
+    page = build_page(collect(None, None, 1_000_000))
+    assert "[hidden] { display: none !important; }" in page
