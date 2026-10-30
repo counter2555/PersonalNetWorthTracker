@@ -7,7 +7,8 @@
   <a class="button" href="{{ root }}/columns/new">+ Neue Spalte</a>
 </div>
 <p class="hint">Reihenfolge = Spalten im Excel. Die erste Spalte ist immer „{{ DATE_COLUMN }}“.
-  Anlagegruppe und Rolle steuern das Dashboard.</p>
+  Anlagegruppe und Rolle steuern das Dashboard.
+  {% if auth_enabled %}Die Spalten gelten nur für dein Konto – andere Benutzer haben ihre eigene Konfiguration.{% endif %}</p>
 <div class="table-wrap">
 <table>
   <thead><tr><th>Name</th><th class="text">Typ</th><th class="text">Formel</th><th class="text">Format</th>

@@ -137,3 +137,24 @@ def test_last_admin_protected(users):
     users.delete(users.by_name("tester").id)
     assert users.all() == [other]
     assert users.create("ivan", "secret-pass").id > other.id  # ids (= data files) are never reused
+
+
+def test_columns_per_user(app, users, store):
+    client, _ = register(app, "jane")
+    jane = users.store(users.by_name("jane").id)
+    admin_columns = [c.name for c in store.columns()]
+
+    client.post("/columns/new", data={"name": "Krypto", "kind": "input", "number_format": "currency", "width": "12"})
+    giro = next(c for c in jane.columns() if c.name == "Girokonto")
+    client.post(f"/columns/{giro.id}", data={"name": "Hauptkonto", "number_format": "currency", "width": "12",
+                                             "asset_group": giro.asset_group, "role": giro.role})
+    kommentar = next(c for c in jane.columns() if c.name == "Kommentar")
+    client.post(f"/columns/{kommentar.id}/delete")
+
+    names = [c.name for c in jane.columns()]
+    assert "Krypto" in names and "Hauptkonto" in names and "Girokonto" not in names and "Kommentar" not in names
+    assert [c.name for c in store.columns()] == admin_columns  # the admin's columns are untouched
+    admin = client_for(app, "tester", "test-password")
+    page = admin.get("/columns").text
+    assert "Krypto" not in page and "Hauptkonto" not in page and "Girokonto" in page
+    assert "Hauptkonto" in client.get("/columns").text
