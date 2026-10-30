@@ -9,6 +9,8 @@ Self-hosted Service (Docker) zum Erfassen des Vermögens von überall – mit Ex
   zusätzlich als eigenständige HTML-Datei herunterladbar.
 * **Einkommens-Dashboard** zum erfassten Nettogehalt: letzte 12 Monate, Gehalt pro Monat und Jahr,
   Jahresvergleich, Jahresverlauf und – mit Vermögens-Einträgen – Aufteilung in gespart und ausgegeben.
+* **Erfolge**: Achievements im Stil von Spiele-Plattformen zu Vermögen, Börse, Disziplin, Einkommen und Sparquote –
+  mit Stufen (Bronze bis Platin), Punkten, Fortschrittsbalken, geheimen und negativen „Schande“-Achievements.
 * **Excel-Export** jederzeit: Sheet „Net Worth“ mit Formeln, Formaten und bedingter Formatierung, Sheet „Income“.
 * **Excel-Import** der bestehenden Datei (Einstellungen → Excel importieren oder `networth import`).
 * **Spalten konfigurierbar**: Eingabe-, Formel- und Textspalten anlegen, umbenennen, verschieben, löschen.

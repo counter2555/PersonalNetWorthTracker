@@ -189,3 +189,13 @@ def test_entry_form_sections_and_field_errors(client, store):
     key = f"c{columns['Girokonto']}"
     assert f'aria-describedby="err-{key}"' in bad.text and f'id="err-{key}">Keine Zahl' in bad.text
     assert 'value="abc"' in bad.text  # typed input is kept
+
+
+def test_achievements(client, store, example_xlsx):
+    login(client)
+    assert "Noch keine Erfolge" in client.get("/achievements").text
+    with open(example_xlsx, "rb") as f:
+        client.post("/import", data={"confirm": "yes"}, files={"file": ("x.xlsx", f, "application/octet-stream")})
+    page = client.get("/achievements")
+    assert page.status_code == 200
+    assert "Erste Schritte" in page.text and "Schande" in page.text and "Freigeschaltet" in page.text

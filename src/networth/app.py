@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from plotly.offline import get_plotlyjs
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import dashboard, income_dashboard
+from . import achievements, dashboard, income_dashboard
 from . import formula as fx
 from .auth import check_credentials, ensure_configured, is_authenticated
 from .columns import DATE_COLUMN, FORMATS, KINDS, ROLES, Column, Layout, form_sections
@@ -31,7 +31,8 @@ PUBLIC_PATHS = {"/login", "/healthz", "/static/style.css"}
 PAGE_SIZES = (25, 50, 100)  # entries per page; 0 = all
 DEFAULT_PAGE_SIZE = 50
 
-NAV = [("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
+NAV = [("/", "Dashboard"), ("/income/dashboard", "Einkommens-Dashboard"), ("/achievements", "Erfolge"),
+       ("/entries", "Einträge"), ("/entries/new", "+ Neuer Eintrag"), ("/income", "Einkommen"),
        ("/columns", "Spalten"), ("/settings", "Einstellungen"), ("/export.xlsx", "Excel ⬇")]
 
 
@@ -193,6 +194,17 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
                                            plotly_src=plotly_src, nav=nav)
         return cached(request, "income", standalone, build)
 
+    def render_achievements(request: Request) -> str | None:
+        def build(plotly_src: str | None, nav: str) -> str | None:
+            columns, entries, rows = sheet()
+            income = dashboard.load_income([(i.date, i.amount) for i in store.income()])
+            if not rows and income is None:
+                return None
+            layout = Layout.from_columns(columns, store.group_order())
+            return achievements.render(to_frame(columns, rows) if rows else None, layout, income,
+                                       float(store.settings()["target"]), nav=nav)
+        return cached(request, "achievements", False, build)
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         try:
@@ -232,6 +244,19 @@ def create_app(config: Config | None = None, store: Store | None = None) -> Fast
         if content is None:
             raise HTTPException(404, "Noch kein Einkommen")
         return HTMLResponse(content, headers={"Content-Disposition": _attachment("income_dashboard", "html")})
+
+    @app.get("/achievements", response_class=HTMLResponse)
+    def achievements_page(request: Request):
+        try:
+            content = render_achievements(request)
+        except Exception as exc:  # same as the dashboards: never lock the user out of the UI
+            return page(request, "message.html", status_code=500, title="Erfolge-Fehler",
+                        message=f"Die Erfolge konnten nicht berechnet werden: {exc}.")
+        if content is None:
+            return page(request, "message.html", title="Noch keine Erfolge",
+                        message="Lege den ersten Vermögens-Eintrag an oder trage dein Nettogehalt unter "
+                                "„Einkommen“ ein – dann gibt es hier Achievements.")
+        return HTMLResponse(content)
 
     # -- entries ------------------------------------------------------------
 
