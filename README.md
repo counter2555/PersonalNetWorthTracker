@@ -14,7 +14,10 @@ Self-hosted Service (Docker) zum Erfassen des Vermögens von überall – mit Ex
 * **Excel-Export** jederzeit: Sheet „Net Worth“ mit Formeln, Formaten und bedingter Formatierung, Sheet „Income“.
 * **Excel-Import** der bestehenden Datei (Einstellungen → Excel importieren oder `networth import`).
 * **Spalten konfigurierbar**: Eingabe-, Formel- und Textspalten anlegen, umbenennen, verschieben, löschen.
-* **Login** (Benutzer/Passwort, Session-Cookie; HTTP Basic Auth für Skripte).
+* **Mehrbenutzerfähig**: Registrierung mit Benutzername und Passwort, jedes Konto hat eigene, getrennte Daten
+  (Einträge, Spalten, Einkommen, Einstellungen). Login per Session-Cookie, HTTP Basic Auth für Skripte.
+* **Administratoren** verwalten unter *Benutzer* die Konten: anlegen, löschen (inkl. aller Daten), Passwort
+  zurücksetzen, Admin-Rechte vergeben/entziehen und die Selbst-Registrierung öffnen oder schließen.
 * **SQLite** als einzige Datenbank, gespeichert im gemounteten Ordner.
 
 ## Start mit Docker
@@ -26,20 +29,34 @@ docker compose build
 docker compose run --rm networth networth hash-password
 ```
 
-Den ausgegebenen Hash (mit verdoppelten `$$`) als `NWT_PASSWORD_HASH` in `.env` eintragen, dann:
+Den ausgegebenen Hash (mit verdoppelten `$$`) als `NWT_PASSWORD_HASH` in `.env` eintragen. Damit wird beim ersten
+Start der erste **Administrator** `NWT_USERNAME` angelegt; danach sind die Konten in der Datenbank maßgeblich
+(Passwortänderungen unter *Konto* bzw. *Benutzer*, Änderungen an `.env` wirken sich nicht mehr aus). Dann:
 
 ```bash
 docker compose up -d
 ```
 
-Der Service läuft auf <http://localhost:8000>. Datenbank (`networth.sqlite`) und Session-Schlüssel liegen im Ordner
+Der Service läuft auf <http://localhost:8000>. Datenbanken (`users.sqlite` mit den Konten, `users/<id>.sqlite` mit den
+Daten je Benutzer) und Session-Schlüssel liegen im Ordner
 `./data` (bzw. `NWT_HOST_DATA_DIR`), der als Volume nach `/data` gemountet wird – diesen Ordner sichern.
 Der Container läuft als UID/GID `PUID`/`PGID` (Standard 1000); der Ordner muss für diesen Benutzer schreibbar sein.
 
 Bestehendes Excel übernehmen: im Browser unter *Einstellungen → Excel importieren* oder
 
 ```bash
-docker compose run --rm -v "/pfad/zu/NetWorth.xlsx:/import.xlsx:ro" networth networth import /import.xlsx
+docker compose run --rm -v "/pfad/zu/NetWorth.xlsx:/import.xlsx:ro" networth networth import --user admin /import.xlsx
+```
+
+**Upgrade von der Einzelbenutzer-Version:** Beim ersten Start wird die bisherige `networth.sqlite` automatisch zu den
+Daten des Administrators `NWT_USERNAME` (nach `users/1.sqlite` verschoben). Vorher den Datenordner sichern.
+
+Benutzer auf der Kommandozeile verwalten (z. B. Admin-Passwort vergessen):
+
+```bash
+docker compose run --rm networth networth users
+docker compose run --rm networth networth create-user bob
+docker compose run --rm networth networth set-password admin --admin
 ```
 
 Excel per Skript sichern (Basic Auth):
@@ -47,6 +64,8 @@ Excel per Skript sichern (Basic Auth):
 ```bash
 curl -u admin -o NetWorth.xlsx http://localhost:8000/export.xlsx
 ```
+
+Jeder Benutzer exportiert so seine eigenen Daten.
 
 ## Deployment auf den Homeserver
 
@@ -111,11 +130,11 @@ Testdaten (fiktiv) erzeugen und importieren:
 
 ```bash
 poetry run python scripts/generate_test_data.py data/example_NetWorth.xlsx
-poetry run networth import data/example_NetWorth.xlsx
+poetry run networth import --user admin data/example_NetWorth.xlsx
 ```
 
 **Keine echten Daten einchecken** – `data/`, `*.xlsx`, `*.sqlite` und `.env` sind in `.gitignore`.
 
 Struktur (`src/networth/`): `formula.py` (Formelsprache), `columns.py` (Spaltenkonfiguration, Standardlayout),
 `db.py` (SQLite), `sheet.py` (Berechnung), `excel.py` (Import/Export), `dashboard.py` (Plotly-Dashboard),
-`app.py` (FastAPI-Weboberfläche), `auth.py`, `cli.py`.
+`app.py` (FastAPI-Weboberfläche), `auth.py`, `users.py` (Konten, Datenbank je Benutzer), `cli.py`.

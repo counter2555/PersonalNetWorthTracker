@@ -10,8 +10,8 @@ from networth.auth import hash_password, verify_password
 
 
 @pytest.fixture
-def client(config, store):
-    return TestClient(create_app(config, store))
+def client(config, users, store):
+    return TestClient(create_app(config, users))
 
 
 def login(client):

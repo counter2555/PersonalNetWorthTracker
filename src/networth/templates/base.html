@@ -13,8 +13,9 @@
 {% block toolbar %}
 <div class="toolbar">
   <nav>
-    {% for href, label in NAV %}<a href="{{ root }}{{ href }}"{% if path == root ~ href %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
-    {% if auth_enabled %}<form method="post" action="{{ root }}/logout"><button type="submit">Abmelden</button></form>{% endif %}
+    {% for href, label in nav %}<a href="{{ root }}{{ href }}"{% if path == root ~ href %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+    {% if auth_enabled %}<a href="{{ root }}/account"{% if path == root ~ '/account' %} class="active"{% endif %}>{{ user.username }}</a>
+    <form method="post" action="{{ root }}/logout"><button type="submit">Abmelden</button></form>{% endif %}
   </nav>
   Darstellung {{ THEME_SWITCH_HTML | safe }}
 </div>

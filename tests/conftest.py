@@ -9,8 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import generate_test_data  # noqa: E402
 
+from networth.auth import ensure_configured  # noqa: E402
 from networth.config import Config  # noqa: E402
 from networth.db import Store  # noqa: E402
+from networth.users import Users  # noqa: E402
 
 
 @pytest.fixture
@@ -22,8 +24,17 @@ def example_xlsx(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Store:
-    return Store(tmp_path / "data" / "networth.sqlite")
+def users(config: Config) -> Users:
+    """Accounts with the administrator "tester" from the configuration."""
+    users = Users(config.data_dir)
+    ensure_configured(config, users)
+    return users
+
+
+@pytest.fixture
+def store(users: Users) -> Store:
+    """Data of "tester"."""
+    return users.store(users.by_name("tester").id)
 
 
 @pytest.fixture

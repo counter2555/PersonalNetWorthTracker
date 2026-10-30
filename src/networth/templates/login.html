@@ -11,5 +11,6 @@
     <label>Passwort <input name="password" type="password" autocomplete="current-password" required></label>
     <button type="submit" class="primary">Anmelden</button>
   </form>
+  {% if registration %}<p class="hint">Noch kein Konto? <a href="{{ root }}/register">Registrieren</a></p>{% endif %}
 </div>
 {% endblock %}
