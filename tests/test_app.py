@@ -275,3 +275,7 @@ def test_achievements(client, store, example_xlsx):
     page = client.get("/achievements")
     assert page.status_code == 200
     assert "Erste Schritte" in page.text and "Schande" in page.text and "Freigeschaltet" in page.text
+    titles = re.findall(r'<span class="ach-title">([^<]*)</span>', page.text)
+    assert len(titles) > 100 and "Phönix" in titles and "Fünf Jahresgehälter" in titles
+    named = [t for t in titles if t != "Geheimes Achievement"]
+    assert len(named) == len(set(named))
