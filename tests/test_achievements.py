@@ -1,7 +1,8 @@
 import pandas as pd
 import pytest
 
-from networth.achievements import achievement, build_page, collect, recovered_drawdowns, streaks
+from networth.achievements import (_palindrome, _salary_multiples, achievement, build_page, collect,
+                                   recovered_drawdowns, streaks)
 
 
 def test_unlocked_on_first_date_and_stays_unlocked():
@@ -24,6 +25,20 @@ def test_streaks():
 def test_recovered_drawdowns():
     # drops 20 % below the peak, but only recovers to a new peak at the end
     assert recovered_drawdowns(pd.Series([1.0, 0.8, 0.9, 1.1])).tolist() == pytest.approx([0, 0, 0, 0.2])
+
+
+def test_palindrome():
+    assert _palindrome(12_321) and _palindrome(-45_654.4)
+    assert not _palindrome(1_221) and not _palindrome(22_222) and not _palindrome(12_345)
+
+
+def test_salary_multiples_use_the_last_twelve_months():
+    income = pd.Series([2000.0] * 12 + [3000.0], index=pd.period_range("2024-01", periods=13, freq="M"))
+    total = pd.Series([10_000.0, 24_000.0, 36_000.0],
+                      index=pd.to_datetime(["2024-11-15", "2024-12-31", "2025-01-31"]))
+    multiples = _salary_multiples(total, income)
+    assert pd.isna(multiples.iloc[0])  # less than 12 months of salary
+    assert multiples.iloc[1:].tolist() == pytest.approx([1.0, 36_000 / 25_000])
 
 
 def test_collect_without_net_worth_entries():

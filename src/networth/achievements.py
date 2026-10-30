@@ -15,9 +15,9 @@ from typing import Sequence
 import pandas as pd
 
 from .columns import DATE_COLUMN, Layout
-from .dashboard import (CSS, DEPOT_PAID_IN, DEPOT_VALUE, MARKET_GAIN, MONTHS_DE, NET_GAINS, TAX, THEME_INIT_JS,
+from .dashboard import (COMMENT, CSS, DEPOT_PAID_IN, DEPOT_VALUE, MARKET_GAIN, MONTHS_DE, NET_GAINS, TAX, THEME_INIT_JS,
                         THEME_SWITCH_JS, TOTAL, Data, Summary, _de, _euro, _kpi, _percent, period_flows,
-                        period_salaries, prepare_data, summarize, toolbar_html)
+                        period_salaries, prepare_data, savings_rates, summarize, toolbar_html)
 from .income_dashboard import monthly_income, yearly_income
 
 TIERS = {"bronze": ("Bronze", 10), "silver": ("Silber", 25), "gold": ("Gold", 50), "platinum": ("Platin", 100)}
@@ -123,9 +123,33 @@ def _yearly(df: pd.DataFrame, income: pd.Series) -> pd.DataFrame:
     return table
 
 
+def _yearly_flows(df: pd.DataFrame) -> pd.DataFrame:
+    """``period_flows`` per calendar year, indexed by the year's last entry."""
+    flows = period_flows(df, "Y")
+    last = df.groupby(df[DATE_COLUMN].dt.to_period("Y"))[DATE_COLUMN].last()
+    flows.index = pd.DatetimeIndex(last.loc[flows.index].to_numpy())
+    return flows
+
+
+def _salary_multiples(total: pd.Series, income: pd.Series) -> pd.Series:
+    """Net worth ÷ net salary of the last 12 complete months before each entry (NaN with less salary history)."""
+    monthly = monthly_income(income)["Gesamt"]
+    trailing = monthly.rolling(12, min_periods=12).sum()
+    trailing.index = _month_end(monthly.index)
+    at = pd.merge_asof(pd.DataFrame({"date": total.index}), trailing.rename("salary").rename_axis("date").reset_index(),
+                       on="date", allow_exact_matches=True)["salary"]
+    at = at.where(at > 0).to_numpy()
+    return pd.Series(total.to_numpy() / at, index=total.index)
+
+
 def _schnapszahl(value: float) -> bool:
     digits = str(abs(round(value)))
     return len(digits) >= 4 and len(set(digits)) == 1
+
+
+def _palindrome(value: float) -> bool:
+    digits = str(abs(round(value)))
+    return len(digits) >= 5 and digits == digits[::-1] and len(set(digits)) > 1  # Schnapszahlen count separately
 
 
 # ---------------------------------------------------------------------------
@@ -137,37 +161,63 @@ def wealth_achievements(data: Data, target: float) -> list[Achievement]:
     total = df.set_index(DATE_COLUMN)[TOTAL]
     entries = pd.Series(range(1, len(df) + 1), index=total.index, dtype=float)
     flows = _monthly_flows(df)
+    yearly = _yearly_flows(df)
     first = float(total.iloc[0])
     highs = (total > total.cummax().shift(fill_value=float("-inf"))).cumsum().astype(float) - 1  # first entry isn't a record
 
     a = [achievement("🐣", "Erste Schritte", "Den ersten Vermögens-Eintrag angelegt.", WEALTH, "bronze", entries, 1, ""),
          achievement("🪙", "Notgroschen", "1.000 € Vermögen.", WEALTH, "bronze", total, 1_000),
+         achievement("🧱", "Startkapital", "5.000 € Vermögen.", WEALTH, "bronze", total, 5_000),
          achievement("🖐️", "Fünfstellig", "10.000 € Vermögen – die erste fünfstellige Zahl.", WEALTH, "bronze",
                      total, 10_000),
          achievement("🛋️", "Polster", "25.000 € Vermögen.", WEALTH, "silver", total, 25_000),
          achievement("🏠", "Halbe Miete", "50.000 € Vermögen.", WEALTH, "silver", total, 50_000),
+         achievement("🔭", "Sechsstellig in Sicht", "75.000 € Vermögen.", WEALTH, "silver", total, 75_000),
          achievement("💯", "Die schwersten Hunderttausend", "100.000 € Vermögen. Ab hier hilft der Zinseszins mit.",
                      WEALTH, "gold", total, 100_000),
+         achievement("🏡", "Eigenkapital", "150.000 € Vermögen – genug Eigenkapital für so manche Immobilie.", WEALTH,
+                     "gold", total, 150_000),
          achievement("🏰", "Viertelmillionär", "250.000 € Vermögen.", WEALTH, "gold", total, 250_000),
          achievement("🛥️", "Halbmillionär", "500.000 € Vermögen.", WEALTH, "platinum", total, 500_000),
          achievement("👑", "Millionär", "1.000.000 € Vermögen. Willkommen im Club.", WEALTH, "platinum",
-                     total, 1_000_000)]
+                     total, 1_000_000),
+         achievement("🏝️", "Doppelmillionär", "2.000.000 € Vermögen. Die Insel ist fast bezahlt.", WEALTH, "platinum",
+                     total, 2_000_000)]
     if target > 0 and target != 1_000_000:
         a.append(achievement("🎯", "Mission erfüllt", f"Das eigene Ziel von {_euro(target)} erreicht "
                              "(Einstellungen).", WEALTH, "platinum", total, target))
     if first > 0:
         a += [achievement("✌️", "Verdoppler", "Vermögen verdoppelt gegenüber dem ersten Eintrag.", WEALTH, "silver",
                           total / first, 2, "×"),
+              achievement("☘️", "Verdreifacher", "Dreimal so viel Vermögen wie beim ersten Eintrag.", WEALTH, "silver",
+                          total / first, 3, "×"),
               achievement("🚀", "Verfünffacher", "Fünfmal so viel Vermögen wie beim ersten Eintrag.", WEALTH, "gold",
-                          total / first, 5, "×")]
+                          total / first, 5, "×"),
+              achievement("🌠", "Verzehnfacher", "Zehnmal so viel Vermögen wie beim ersten Eintrag.", WEALTH,
+                          "platinum", total / first, 10, "×")]
     a += [achievement("📈", "Allzeithoch", "10 neue Vermögens-Rekorde aufgestellt.", WEALTH, "bronze", highs, 10,
                       "Rekorde"),
           achievement("🏔️", "Gipfelstürmer", "50 neue Vermögens-Rekorde aufgestellt.", WEALTH, "silver", highs, 50,
                       "Rekorde"),
+          achievement("🧗", "Rekordjäger", "100 neue Vermögens-Rekorde aufgestellt.", WEALTH, "gold", highs, 100,
+                      "Rekorde"),
+          achievement("🐦‍🔥", "Phönix", "Nach einem Rückgang von 10 % ein neues Vermögens-Hoch erreicht.", WEALTH,
+                      "silver", recovered_drawdowns(total), 0.10, "%"),
+          achievement("👍", "Guter Monat", "Vermögen in einem Kalendermonat um 1.000 € gesteigert.", WEALTH, "bronze",
+                      flows["Gesamt"], 1_000),
           achievement("💥", "Rekordmonat", "Vermögen in einem Kalendermonat um 5.000 € gesteigert.", WEALTH, "silver",
                       flows["Gesamt"], 5_000),
           achievement("🌋", "Monstermonat", "Vermögen in einem Kalendermonat um 20.000 € gesteigert.", WEALTH, "gold",
                       flows["Gesamt"], 20_000),
+          achievement("🌾", "Starkes Jahr", "Vermögen in einem Kalenderjahr um 25.000 € gesteigert.", WEALTH, "silver",
+                      yearly["Gesamt"], 25_000),
+          achievement("☄️", "Jahrhundertjahr", "Vermögen in einem Kalenderjahr um 100.000 € gesteigert.", WEALTH,
+                      "platinum", yearly["Gesamt"], 100_000),
+          achievement("🎱", "Glatte Sache", "Ein Vermögensstand auf den Euro genau in runden Tausendern, z. B. "
+                      "17.000 €.", WEALTH, "bronze",
+                      ((total.round() % 1_000 == 0) & (total.round() != 0)).astype(float), 1, "", secret=True),
+          achievement("🪞", "Spiegelbild", "Ein Vermögensstand, der vorwärts wie rückwärts gleich ist, z. B. 12.321 €.",
+                      WEALTH, "silver", total.map(_palindrome).astype(float), 1, "", secret=True),
           achievement("🍻", "Schnapszahl", "Ein Vermögensstand mit lauter gleichen Ziffern, z. B. 22.222 €.", WEALTH,
                       "silver", total.map(_schnapszahl).astype(float), 1, "", secret=True),
           achievement("🕶️", "1337", "Ein Vermögensstand, der auf …1.337 € endet. Elite.", WEALTH, "silver",
@@ -180,26 +230,57 @@ def market_achievements(data: Data) -> list[Achievement]:
     dated = df.set_index(DATE_COLUMN)
     gains = dated[MARKET_GAIN]
     flows = _monthly_flows(df)
+    yearly = _yearly_flows(df)
     a = [achievement("🌱", "Das Geld arbeitet", "1.000 € Kursgewinne nach Steuer angesammelt.", MARKET, "bronze",
                      gains, 1_000),
+         achievement("⛄", "Schneeball", "5.000 € Kursgewinne nach Steuer angesammelt.", MARKET, "bronze",
+                     gains, 5_000),
          achievement("🌳", "Zinseszins-Zauberer", "25.000 € Kursgewinne nach Steuer angesammelt.", MARKET, "silver",
                      gains, 25_000),
+         achievement("⚙️", "Kapitalmaschine", "50.000 € Kursgewinne nach Steuer angesammelt.", MARKET, "gold",
+                     gains, 50_000),
          achievement("🏦", "Kapitalist", "100.000 € Kursgewinne nach Steuer angesammelt.", MARKET, "gold",
                      gains, 100_000),
+         achievement("🎩", "Rentier", "250.000 € Kursgewinne nach Steuer angesammelt.", MARKET, "platinum",
+                     gains, 250_000),
          achievement("🎢", "Bullenritt", "In einem Kalendermonat 3.000 € Kursgewinne.", MARKET, "silver",
-                     flows["Kursgewinne"], 3_000)]
+                     flows["Kursgewinne"], 3_000),
+         achievement("🐂", "Rallye", "In einem Kalendermonat 10.000 € Kursgewinne.", MARKET, "gold",
+                     flows["Kursgewinne"], 10_000),
+         achievement("🍎", "Erntejahr", "In einem Kalenderjahr 10.000 € Kursgewinne.", MARKET, "silver",
+                     yearly["Kursgewinne"], 10_000),
+         achievement("⛵", "Rückenwind", "6 Monate in Folge Kursgewinne.", MARKET, "silver",
+                     streaks(flows["Kursgewinne"] > 0), 6, "Monate"),
+         achievement("🛒", "Buy the Dip", "In einem Monat mit mindestens 1.000 € Kursverlust trotzdem gespart.", MARKET,
+                     "silver", ((flows["Kursgewinne"] <= -1_000) & (flows["Sparen"] > 0)).astype(float), 1, "",
+                     secret=True)]
     if data.has_depot:
         depot = dated[dated[DEPOT_PAID_IN] > 0]
         returns = (depot[DEPOT_VALUE] + depot[TAX] - depot[DEPOT_PAID_IN]) / depot[DEPOT_PAID_IN]
         ratio = depot[DEPOT_VALUE] / depot[DEPOT_PAID_IN]
+        positive = dated[TOTAL] > 0
+        share = (dated[DEPOT_VALUE] / dated[TOTAL]).where(positive)
         a += [achievement("📊", "Im grünen Bereich", "Depot-Rendite von 10 % nach KESt (gesamt seit Depotstart).",
                           MARKET, "bronze", returns, 0.10, "%"),
+              achievement("🍀", "Viertel drauf", "Depot-Rendite von 25 % nach KESt.", MARKET, "silver", returns, 0.25,
+                          "%"),
               achievement("🔥", "Heißes Händchen", "Depot-Rendite von 50 % nach KESt.", MARKET, "gold", returns, 0.5,
                           "%"),
               achievement("🦄", "Doppelt hält besser", "Depot-Rendite von 100 % nach KESt – eingezahltes Geld "
                           "verdoppelt.", MARKET, "platinum", returns, 1.0, "%"),
               achievement("💎", "Diamond Hands", "Einen Kursrückgang von 10 % im Depot ausgesessen, bis es ein neues "
-                          "Hoch gab (Depotwert ÷ eingezahlt).", MARKET, "gold", recovered_drawdowns(ratio), 0.10, "%")]
+                          "Hoch gab (Depotwert ÷ eingezahlt).", MARKET, "gold", recovered_drawdowns(ratio), 0.10, "%"),
+              achievement("🧘", "Eiserne Nerven", "Einen Kursrückgang von 25 % im Depot ausgesessen, bis es ein neues "
+                          "Hoch gab.", MARKET, "platinum", recovered_drawdowns(ratio), 0.25, "%"),
+              achievement("📥", "Fleißiger Anleger", "10.000 € ins Depot eingezahlt.", MARKET, "bronze",
+                          dated[DEPOT_PAID_IN], 10_000),
+              achievement("🏗️", "Großinvestor", "100.000 € ins Depot eingezahlt.", MARKET, "gold",
+                          dated[DEPOT_PAID_IN], 100_000),
+              achievement("💼", "Dickes Depot", "Depotwert von 50.000 €.", MARKET, "silver", dated[DEPOT_VALUE], 50_000),
+              achievement("💹", "Sechsstelliges Depot", "Depotwert von 100.000 €.", MARKET, "gold",
+                          dated[DEPOT_VALUE], 100_000),
+              achievement("📐", "Aktionär aus Überzeugung", "Mindestens die Hälfte des Vermögens steckt im Depot.",
+                          MARKET, "silver", share, 0.5, "%")]
     return a
 
 
@@ -215,22 +296,42 @@ def habit_achievements(data: Data) -> list[Achievement]:
     accounts = [c for c in data.stack_order if c != NET_GAINS]
     positive = (df[accounts] > 0).sum(axis=1).astype(float) if accounts else pd.Series(0.0, index=df.index)
     positive.index = dates
+    in_month = pd.Series((df.groupby(months).cumcount() + 1).astype(float).to_numpy(), index=dates)
+    comments = df[COMMENT].fillna("").astype(str).str.strip() != ""
+    commented = pd.Series(comments.cumsum().astype(float).to_numpy(), index=dates)
+    new_year = pd.Series(((dates.dt.month == 12) & (dates.dt.day == 31)).astype(float).to_numpy(), index=dates)
     return [
+        achievement("✏️", "Warmgelaufen", "10 Einträge erfasst.", HABIT, "bronze", entries, 10, "Einträge"),
         achievement("📒", "Buchhalter", "25 Einträge erfasst.", HABIT, "bronze", entries, 25, "Einträge"),
         achievement("🗄️", "Archivar", "100 Einträge erfasst.", HABIT, "silver", entries, 100, "Einträge"),
         achievement("🧾", "Erbsenzähler", "250 Einträge erfasst.", HABIT, "gold", entries, 250, "Einträge"),
+        achievement("🐙", "Datenkrake", "500 Einträge erfasst.", HABIT, "platinum", entries, 500, "Einträge"),
         achievement("📅", "Am Ball geblieben", "12 Monate in Folge mindestens einen Eintrag.", HABIT, "bronze",
                     entry_streak, 12, "Monate"),
+        achievement("🗓️", "Dranbleiber", "24 Monate in Folge mindestens einen Eintrag.", HABIT, "silver",
+                    entry_streak, 24, "Monate"),
         achievement("⏰", "Gewohnheitstier", "36 Monate in Folge mindestens einen Eintrag.", HABIT, "gold",
                     entry_streak, 36, "Monate"),
+        achievement("🕰️", "Uhrwerk", "60 Monate in Folge mindestens einen Eintrag.", HABIT, "platinum",
+                    entry_streak, 60, "Monate"),
         achievement("🐷", "Sparschwein", "6 Monate in Folge gespart (Vermögenszuwachs ohne Kursgewinne > 0).", HABIT,
                     "bronze", saving_streak, 6, "Monate"),
         achievement("🤖", "Sparmaschine", "12 Monate in Folge gespart.", HABIT, "silver", saving_streak, 12, "Monate"),
         achievement("🗿", "Unaufhaltsam", "24 Monate in Folge gespart.", HABIT, "gold", saving_streak, 24, "Monate"),
+        achievement("🏅", "Sparlegende", "36 Monate in Folge gespart.", HABIT, "platinum", saving_streak, 36, "Monate"),
         achievement("🎂", "Jahrestag", "Ein Jahr Vermögen getrackt.", HABIT, "bronze", years, 1, "Jahre"),
+        achievement("🦉", "Alter Hase", "Drei Jahre Vermögen getrackt.", HABIT, "silver", years, 3, "Jahre"),
         achievement("🏛️", "Veteran", "Fünf Jahre Vermögen getrackt.", HABIT, "gold", years, 5, "Jahre"),
+        achievement("📜", "Lebenswerk", "Zehn Jahre Vermögen getrackt.", HABIT, "platinum", years, 10, "Jahre"),
         achievement("🧺", "Viele Körbe", "Gleichzeitig 5 Konten mit positivem Saldo.", HABIT, "bronze", positive, 5,
                     "Konten"),
+        achievement("🕸️", "Breit gestreut", "Gleichzeitig 10 Konten mit positivem Saldo.", HABIT, "silver", positive,
+                    10, "Konten"),
+        achievement("📝", "Tagebuch", "10 Einträge mit Kommentar.", HABIT, "bronze", commented, 10, "Einträge"),
+        achievement("🔍", "Kontrollfreak", "4 Einträge in einem einzigen Kalendermonat.", HABIT, "bronze", in_month, 4,
+                    "Einträge", secret=True),
+        achievement("🎆", "Silvester-Bilanz", "Einen Eintrag am 31. Dezember gemacht.", HABIT, "bronze", new_year, 1, "",
+                    secret=True),
     ]
 
 
@@ -249,15 +350,22 @@ def income_achievements(income: pd.Series) -> list[Achievement]:
                     for year in yearly.index]
     return [
         achievement("💶", "Zahltag", "Das erste Nettogehalt eingetragen.", INCOME, "bronze", lifetime, 0.01),
+        achievement("👛", "Auskommen", "Ein Monat mit 2.000 € netto.", INCOME, "bronze", dated, 2_000),
         achievement("💵", "Gutverdiener", "Ein Monat mit 3.000 € netto.", INCOME, "bronze", dated, 3_000),
         achievement("💰", "Spitzenverdiener", "Ein Monat mit 5.000 € netto.", INCOME, "silver", dated, 5_000),
+        achievement("💳", "Großverdiener", "Ein Monat mit 7.500 € netto.", INCOME, "gold", dated, 7_500),
         achievement("🤑", "Fünfstelliger Monat", "Ein Monat mit 10.000 € netto.", INCOME, "gold", dated, 10_000),
+        achievement("🧰", "Volles Jahr", "30.000 € netto in einem Kalenderjahr.", INCOME, "bronze", year_to_date,
+                    30_000),
         achievement("📆", "Solides Jahr", "50.000 € netto in einem Kalenderjahr.", INCOME, "silver", year_to_date,
                     50_000),
+        achievement("🥂", "Glanzjahr", "75.000 € netto in einem Kalenderjahr.", INCOME, "gold", year_to_date, 75_000),
         achievement("🏆", "Sechsstellig netto", "100.000 € netto in einem Kalenderjahr.", INCOME, "platinum",
                     year_to_date, 100_000),
         achievement("🧮", "Lebensverdienst I", "100.000 € netto insgesamt verdient (seit Beginn der Aufzeichnung).",
                     INCOME, "bronze", lifetime, 100_000),
+        achievement("🏕️", "Viertelmillion verdient", "250.000 € netto insgesamt verdient.", INCOME, "silver", lifetime,
+                    250_000),
         achievement("⛰️", "Lebensverdienst II", "500.000 € netto insgesamt verdient.", INCOME, "gold", lifetime,
                     500_000),
         achievement("🌌", "Lebens-Million", "1.000.000 € netto insgesamt verdient.", INCOME, "platinum", lifetime,
@@ -266,10 +374,20 @@ def income_achievements(income: pd.Series) -> list[Achievement]:
                     "bronze", raises, 0.05, "%"),
         achievement("🪜", "Karrieresprung", "15 % mehr netto als in denselben Monaten des Vorjahres.", INCOME, "gold",
                     raises, 0.15, "%"),
+        achievement("🦅", "Überflieger", "30 % mehr netto als in denselben Monaten des Vorjahres.", INCOME, "platinum",
+                    raises, 0.30, "%"),
         achievement("🎁", "Bonusmonat", "Ein Monat mit mindestens dem 1,8-fachen des üblichen Gehalts (Median der "
                     "12 Monate davor) – Urlaubs-, Weihnachtsgeld oder Bonus.", INCOME, "silver", bonus, 1.8, "×"),
+        achievement("🎰", "Jackpot", "Ein Monat mit mindestens dem 3-fachen des üblichen Gehalts.", INCOME, "gold",
+                    bonus, 3, "×"),
+        achievement("🤝", "Festanstellung", "12 Monate in Folge ein Gehalt erhalten.", INCOME, "bronze", streak, 12,
+                    "Monate"),
         achievement("🔁", "Treue Seele", "60 Monate in Folge ein Gehalt erhalten.", INCOME, "gold", streak, 60,
                     "Monate"),
+        achievement("🪨", "Firmenurgestein", "120 Monate in Folge ein Gehalt erhalten.", INCOME, "platinum", streak,
+                    120, "Monate"),
+        achievement("🎲", "Gehalts-Schnapszahl", "Ein Monatsgehalt mit lauter gleichen Ziffern, z. B. 3.333 €.",
+                    INCOME, "silver", dated.map(_schnapszahl).astype(float), 1, "", secret=True),
     ]
 
 
@@ -277,25 +395,48 @@ def freedom_achievements(data: Data, income: pd.Series, summary: Summary) -> lis
     df = data.df
     total = df.set_index(DATE_COLUMN)[TOTAL]
     yearly = _yearly(df, income)
+    multiples = _salary_multiples(total, income)
+    monthly_rates = savings_rates(df, income, "M")
+    monthly_rates.index = _month_end(monthly_rates.index)
     a = [achievement("🥉", "Zehntel-Sparer", "Ein Kalenderjahr mit einer Sparquote von 10 %.", FREEDOM, "bronze",
                      yearly["Sparquote"], 0.10, "%"),
          achievement("🥈", "Fleißiges Eichhörnchen", "Ein Kalenderjahr mit einer Sparquote von 25 %.", FREEDOM,
                      "silver", yearly["Sparquote"], 0.25, "%"),
+         achievement("🦊", "Sparfuchs", "Ein Kalenderjahr mit einer Sparquote von 40 %.", FREEDOM, "gold",
+                     yearly["Sparquote"], 0.40, "%"),
          achievement("🥷", "Frugal-Ninja", "Ein Kalenderjahr mit einer Sparquote von 50 %.", FREEDOM, "platinum",
                      yearly["Sparquote"], 0.50, "%"),
+         achievement("🌙", "Halbe-halbe", "Ein Kalendermonat mit einer Sparquote von 50 %.", FREEDOM, "bronze",
+                     monthly_rates, 0.50, "%"),
+         achievement("🪴", "Nebenverdienst Börse", "Ein Kalenderjahr mit Kursgewinnen von 25 % des Nettogehalts.",
+                     FREEDOM, "silver", yearly["Kursgewinne"], 0.25, "%"),
+         achievement("⚖️", "Halbe Arbeit", "Ein Kalenderjahr mit Kursgewinnen von 50 % des Nettogehalts.", FREEDOM,
+                     "gold", yearly["Kursgewinne"], 0.50, "%"),
          achievement("🦾", "Das Geld arbeitet härter als du", "Ein Kalenderjahr, in dem die Kursgewinne höher waren "
-                     "als das Nettogehalt.", FREEDOM, "platinum", yearly["Kursgewinne"], 1.0, "%")]
+                     "als das Nettogehalt.", FREEDOM, "platinum", yearly["Kursgewinne"], 1.0, "%"),
+         achievement("🫙", "Ein Jahresgehalt auf der Kante", "Vermögen so groß wie das Nettogehalt der letzten 12 "
+                     "Monate.", FREEDOM, "bronze", multiples, 1, "×"),
+         achievement("🗃️", "Fünf Jahresgehälter", "Vermögen so groß wie fünf Nettojahresgehälter.", FREEDOM, "gold",
+                     multiples, 5, "×"),
+         achievement("🏯", "Zehn Jahresgehälter", "Vermögen so groß wie zehn Nettojahresgehälter.", FREEDOM,
+                     "platinum", multiples, 10, "×")]
     expenses = (summary.salary_year or 0) - summary.saved_year
     if summary.salary_year and summary.year_months > 0 and expenses > 0:
         per_year = expenses * 12 / summary.year_months
         covered = total / per_year
         note = f"(Ausgaben der letzten 12 Monate: {_euro(per_year)} pro Jahr)"
-        a += [achievement("🏖️", "Ein Jahr Freiheit", f"Vermögen reicht für ein Jahr Ausgaben {note}.", FREEDOM,
+        a += [achievement("☂️", "Notreserve", f"Vermögen reicht für drei Monate Ausgaben {note}.", FREEDOM,
+                          "bronze", covered, 0.25, "Jahre"),
+              achievement("🏖️", "Ein Jahr Freiheit", f"Vermögen reicht für ein Jahr Ausgaben {note}.", FREEDOM,
                           "silver", covered, 1, "Jahre"),
               achievement("🧳", "Sabbatical-ready", f"Vermögen reicht für fünf Jahre Ausgaben {note}.", FREEDOM,
                           "gold", covered, 5, "Jahre"),
+              achievement("🌗", "Halbzeit zur Freiheit", f"Vermögen reicht für 12,5 Jahre Ausgaben – die Hälfte bis "
+                          f"FIRE {note}.", FREEDOM, "gold", covered, 12.5, "Jahre"),
               achievement("🔥", "FIRE", f"Vermögen ≥ 25 Jahresausgaben – nach der 4-%-Regel finanziell frei {note}.",
-                          FREEDOM, "platinum", covered, 25, "Jahre")]
+                          FREEDOM, "platinum", covered, 25, "Jahre"),
+              achievement("🌲", "Generationenvermögen", f"Vermögen ≥ 50 Jahresausgaben – das reicht auch noch für die "
+                          f"Erben {note}.", FREEDOM, "platinum", covered, 50, "Jahre")]
     return a
 
 
@@ -306,28 +447,50 @@ def shame_achievements(data: Data | None, income: pd.Series | None) -> list[Achi
         dated = df.set_index(DATE_COLUMN)
         total = dated[TOTAL]
         flows = _monthly_flows(df)
+        yearly_flows = _yearly_flows(df)
         gaps = pd.Series(df[DATE_COLUMN].diff().dt.days.to_numpy(), index=df[DATE_COLUMN])
         a += [achievement("🤕", "Autsch", "Vermögen ist in einem Kalendermonat um 1.000 € gesunken.", SHAME, "bronze",
                           -flows["Gesamt"], 1_000, shame=True),
               achievement("🪂", "Freier Fall", "Vermögen ist in einem Kalendermonat um 10.000 € gesunken.", SHAME,
                           "gold", -flows["Gesamt"], 10_000, shame=True),
+              achievement("🕳️", "Bodenlos", "Vermögen ist in einem Kalendermonat um 25.000 € gesunken.", SHAME,
+                          "platinum", -flows["Gesamt"], 25_000, shame=True),
+              achievement("🥀", "Verlorenes Jahr", "Am Ende eines Kalenderjahres weniger Vermögen als am Anfang.",
+                          SHAME, "silver", (yearly_flows["Gesamt"].iloc[1:] < 0).astype(float), 1, "", shame=True),
               achievement("🐈‍⬛", "Pechsträhne", "Drei Monate in Folge weniger Vermögen als davor.", SHAME, "silver",
                           streaks(flows["Gesamt"] < 0), 3, "Monate", shame=True),
+              achievement("🌧️", "Schwarze Serie", "Sechs Monate in Folge weniger Vermögen als davor.", SHAME, "gold",
+                          streaks(flows["Gesamt"] < 0), 6, "Monate", shame=True),
               achievement("🫠", "Kaufrausch", "Ein Kalendermonat, in dem 2.000 € mehr ausgegeben als gespart wurden "
                           "(Vermögensänderung ohne Kursgewinne).", SHAME, "silver", -flows["Sparen"], 2_000,
                           shame=True),
+              achievement("🛍️", "Shopping-Exzess", "Ein Kalendermonat, in dem 5.000 € mehr ausgegeben als gespart "
+                          "wurden.", SHAME, "gold", -flows["Sparen"], 5_000, shame=True),
               achievement("🧊", "Rote Zahlen", "Gesamtvermögen unter 0 €.", SHAME, "gold", (total < 0).astype(float),
                           1, "", shame=True),
               achievement("👻", "Verschollen", "90 Tage lang keinen Eintrag gemacht.", SHAME, "bronze", gaps, 90,
                           "Tage", shame=True),
+              achievement("📵", "Funkstille", "180 Tage lang keinen Eintrag gemacht.", SHAME, "silver", gaps, 180,
+                          "Tage", shame=True),
+              achievement("😴", "Dornröschenschlaf", "Ein ganzes Jahr lang keinen Eintrag gemacht.", SHAME, "gold", gaps,
+                          365, "Tage", shame=True),
               achievement("📉", "Crash-Test-Dummy", "In einem Kalendermonat 5.000 € Kursverluste.", SHAME, "silver",
-                          -flows["Kursgewinne"], 5_000, shame=True)]
+                          -flows["Kursgewinne"], 5_000, shame=True),
+              achievement("💣", "Börsencrash", "In einem Kalendermonat 20.000 € Kursverluste.", SHAME, "gold",
+                          -flows["Kursgewinne"], 20_000, shame=True),
+              achievement("😈", "Teufelszahl", "Ein Vermögensstand, der auf …666 € endet.", SHAME, "bronze",
+                          (total.round() % 1_000 == 666).astype(float), 1, "", shame=True, secret=True)]
         if data.has_depot:
             depot = dated[dated[DEPOT_PAID_IN] > 0]
             ratio = depot[DEPOT_VALUE] / depot[DEPOT_PAID_IN]
-            a.append(achievement("🧻", "Papierhände-Test", "Das Depot lag 20 % unter seinem Höchststand "
-                                 "(Depotwert ÷ eingezahlt).", SHAME, "gold", 1 - ratio / ratio.cummax(), 0.20, "%",
-                                 shame=True))
+            returns = (depot[DEPOT_VALUE] + depot[TAX] - depot[DEPOT_PAID_IN]) / depot[DEPOT_PAID_IN]
+            a += [achievement("🎓", "Lehrgeld", "Depot-Rendite von −10 % – das Depot ist weniger wert als eingezahlt.",
+                              SHAME, "silver", -returns, 0.10, "%", shame=True),
+                  achievement("🧻", "Papierhände-Test", "Das Depot lag 20 % unter seinem Höchststand "
+                              "(Depotwert ÷ eingezahlt).", SHAME, "gold", 1 - ratio / ratio.cummax(), 0.20, "%",
+                              shame=True),
+                  achievement("😭", "Tal der Tränen", "Das Depot lag 35 % unter seinem Höchststand.", SHAME, "platinum",
+                              1 - ratio / ratio.cummax(), 0.35, "%", shame=True)]
         if income is not None:
             yearly = _yearly(df, income)
             a += [achievement("🍾", "Lifestyle-Inflation", "Ein Kalenderjahr mit einer Sparquote unter 10 % "
@@ -346,8 +509,12 @@ def shame_achievements(data: Data | None, income: pd.Series | None) -> list[Achi
                       for year in yearly.index]
         a += [achievement("🏜️", "Ebbe in der Kasse", "Ein Monat ganz ohne Gehalt (zwischen zwei Gehältern).", SHAME,
                           "bronze", (dated <= 0).cumsum().astype(float), 1, "", shame=True),
+              achievement("🐪", "Durststrecke", "Drei Monate in Folge ohne Gehalt.", SHAME, "gold",
+                          streaks(dated <= 0), 3, "Monate", shame=True),
               achievement("✂️", "Gehaltsdelle", "5 % weniger netto als in denselben Monaten des Vorjahres.", SHAME,
-                          "silver", cuts, 0.05, "%", shame=True)]
+                          "silver", cuts, 0.05, "%", shame=True),
+              achievement("🪓", "Rückschritt", "15 % weniger netto als in denselben Monaten des Vorjahres.", SHAME,
+                          "gold", cuts, 0.15, "%", shame=True)]
     return a
 
 
