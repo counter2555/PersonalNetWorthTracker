@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Import-Vorschau · Net Worth{% endblock %}
+{% block content %}
+<h1>Import-Vorschau</h1>
+<p class="muted">{{ filename }} wurde gelesen, aber noch nichts geändert.</p>
+
+<div class="compare">
+  <section class="card">
+    <h2>Jetzt gespeichert</h2>
+    <dl class="computed">
+      <dt>Einträge</dt><dd>{{ current_entries }}</dd>
+      {% if current_first %}<dt>Zeitraum</dt><dd>{{ current_first | date }} – {{ current_last | date }}</dd>{% endif %}
+      <dt>Einkommens-Einträge</dt><dd>{{ current_income }}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>Nach dem Import</h2>
+    <dl class="computed">
+      <dt>Einträge</dt><dd>{{ result.entries | length }}</dd>
+      {% if first %}<dt>Zeitraum</dt><dd>{{ first | date }} – {{ last | date }}</dd>{% endif %}
+      <dt>Einkommens-Einträge</dt>
+      <dd>{% if result.income is not none %}{{ result.income | length }}{% else %}{{ current_income }} <span class="muted">(unverändert, kein Sheet „Income“)</span>{% endif %}</dd>
+    </dl>
+  </section>
+</div>
+
+{% if result.new_columns or result.fixed_values or result.ignored %}
+<div class="card">
+  <h2>Hinweise</h2>
+  <ul class="notes">
+    {% if result.new_columns %}<li>{{ result.new_columns | length }} neue {{ "Spalte" if result.new_columns | length == 1 else "Spalten" }}:
+      {{ result.new_columns | map(attribute='name') | join(', ') }}</li>{% endif %}
+    {% if result.fixed_values %}<li>{{ result.fixed_values }} Formelzellen weichen von der aktuellen Formel ab und werden als Festwert übernommen.</li>{% endif %}
+    {% if result.ignored %}<li>Leere Spalten werden ignoriert: {{ result.ignored | join(', ') }}</li>{% endif %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card stack">
+  <h2>1. Aktuellen Stand sichern</h2>
+  <p class="hint">Der Import ersetzt {% if current_entries %}alle {{ current_entries }} Einträge{% else %}die Einträge{% endif %}{% if result.income is not none %} und das Einkommen{% endif %}.
+    Lade vorher eine Sicherung herunter, um den jetzigen Stand bei Bedarf wieder importieren zu können.</p>
+  <div class="actions"><a class="button" href="{{ root }}/export.xlsx" id="backup">Sicherung als Excel herunterladen ⬇</a>
+    <span class="hint" id="backup-done" hidden>✓ Download gestartet</span></div>
+</div>
+
+<form method="post" action="{{ root }}/import" class="card stack">
+  <h2>2. Importieren</h2>
+  <input type="hidden" name="token" value="{{ token }}">
+  <label class="check"><input type="checkbox" name="confirm" value="yes" required>
+    Bestehende Einträge durch die {{ result.entries | length }} Einträge aus der Datei ersetzen</label>
+  <div class="actions">
+    <button type="submit" class="danger-solid">Jetzt importieren</button>
+    <a class="button" href="{{ root }}/settings">Abbrechen</a>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("backup").addEventListener("click", () => { document.getElementById("backup-done").hidden = false; });
+</script>
+{% endblock %}

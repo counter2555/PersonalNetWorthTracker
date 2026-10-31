@@ -11,10 +11,25 @@
 <body>
 {% block toolbar %}{{ toolbar | safe }}{% endblock %}
 <main class="{% block main_class %}{% endblock %}">
-{% for kind, message in flashes %}<div class="flash {{ kind }}">{{ message }}</div>{% endfor %}
+{% for flash in flashes %}
+<div class="flash {{ flash.kind }}{% if flash.action %} has-action{% endif %}" role="{{ 'alert' if flash.kind == 'error' else 'status' }}">
+  <span class="flash-text">{{ flash.message }}</span>
+  {% if flash.action %}<form method="post" action="{{ root }}{{ flash.action }}" class="inline">
+    <button type="submit" class="small">{{ flash.label }}</button></form>{% endif %}
+  <button type="button" class="flash-close" aria-label="Meldung schließen">×</button>
+</div>
+{% endfor %}
 {% block content %}{% endblock %}
 </main>
 <script>{{ THEME_SWITCH_JS | safe }}</script>
+<script>
+// messages: close button; plain confirmations fade out on their own, errors and undo offers stay
+document.querySelectorAll(".flash").forEach(flash => {
+  const close = () => { flash.classList.add("closing"); setTimeout(() => flash.remove(), 250); };
+  flash.querySelector(".flash-close").addEventListener("click", close);
+  if (!flash.classList.contains("error") && !flash.classList.contains("has-action")) setTimeout(close, 6000);
+});
+</script>
 {% if user and auth_enabled %}
 <script>
 // all tabs share the login: tie forms to the user this page was rendered for, reload if someone else logged in

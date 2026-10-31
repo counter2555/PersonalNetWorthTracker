@@ -5,7 +5,10 @@
 <form method="post" action="{{ root }}/settings" class="card stack">
   <h2>Dashboard</h2>
   <div class="fields">
-    <label>Vermögensziel (€) <input class="number" name="target" value="{{ settings.target | float | round(2) }}"></label>
+    <label>Vermögensziel (€) <input class="number" name="target" inputmode="decimal" value="{{ settings.target | float | round(2) }}"></label>
+    <label>Erinnerung nach … Tagen ohne Eintrag
+      <input class="number" name="reminder_days" inputmode="numeric" value="{{ settings.get('reminder_days', '14') }}">
+      <span class="hint">Hinweis oben im Dashboard; 0 = aus.</span></label>
   </div>
   <label class="check"><input type="checkbox" name="show_distribution" {% if settings.show_distribution == '1' %}checked{% endif %}>
     Diagramm „Wo liegt mein Geld?“ anzeigen</label>
@@ -22,12 +25,12 @@
   <p class="hint">Das Excel hat dasselbe Format wie die bisherige NetWorth.xlsx (Formeln inklusive). Die HTML-Dateien funktionieren offline.</p>
 </div>
 
-<form method="post" action="{{ root }}/import" enctype="multipart/form-data" class="card stack">
+<form method="post" action="{{ root }}/import/preview" enctype="multipart/form-data" class="card stack">
   <h2>Excel importieren</h2>
   <p class="hint">Liest Sheet „Net Worth“ (und „Income“, falls vorhanden). Spalten werden über die Überschrift zugeordnet,
-    unbekannte Spalten werden neu angelegt. <strong>Alle {{ entry_count }} bestehenden Einträge werden ersetzt.</strong></p>
+    unbekannte Spalten werden neu angelegt. Du siehst zuerst eine Vorschau; erst danach werden
+    {% if entry_count %}die {{ entry_count }} bestehenden Einträge{% else %}die Einträge{% endif %} ersetzt.</p>
   <input type="file" name="file" accept=".xlsx" required>
-  <label class="check"><input type="checkbox" name="confirm" value="yes" required> Bestehende Einträge ersetzen</label>
-  <div class="actions"><button type="submit">Importieren</button></div>
+  <div class="actions"><button type="submit">Vorschau anzeigen</button></div>
 </form>
 {% endblock %}

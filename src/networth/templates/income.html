@@ -1,37 +1,54 @@
 {% extends "base.html" %}
 {% block title %}Einkommen · Net Worth{% endblock %}
 {% block content %}
-<h1>Einkommen</h1>
-<div class="card">
+<div class="page-head">
+  <h1>Einkommen</h1>
+  <a class="button" href="{{ root }}/income/dashboard">Einkommens-Dashboard</a>
+</div>
+{% macro field_error(key) %}{% if key in errors %}<span class="field-error" id="err-{{ key }}">{{ errors[key] }}</span>{% endif %}{% endmacro %}
+{% macro invalid(key) %}{% if key in errors %} aria-invalid="true" aria-describedby="err-{{ key }}"{% endif %}{% endmacro %}
+<div class="card" id="income-form">
+  {% if edit %}
+  <h2>Nettogehalt vom {{ edit.date | date }} bearbeiten</h2>
+  {% else %}
   <h2>Nettogehalt eintragen</h2>
-  <form method="post" action="{{ root }}/income" class="actions">
-    <label>Datum <input type="date" name="date" value="{{ today.isoformat() }}" required></label>
-    <label>Nettogehalt <input class="number" name="amount" inputmode="text" required></label>
-    <button type="submit" class="primary" style="align-self: end">Hinzufügen</button>
+  {% endif %}
+  <form method="post" action="{{ root }}/income" class="income-form">
+    {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+    {% set date_value = raw.get('date') or (edit.date.isoformat() if edit else suggestion[0].isoformat()) %}
+    {% set amount_value = raw.get('amount') if 'amount' in raw else (('%.2f' | format(edit.amount)) | replace('.', ',') if edit else suggestion[1]) %}
+    <label>Datum <input type="date" name="date" value="{{ date_value }}" required{{ invalid('date') }}>
+      {{ field_error('date') }}</label>
+    <label>Nettogehalt <input class="number" name="amount" inputmode="decimal" autocomplete="off"
+           value="{{ amount_value }}" required{{ invalid('amount') }}{% if edit or errors %} autofocus{% endif %}>
+      {{ field_error('amount') }}</label>
+    <div class="actions">
+      <button type="submit" class="primary">{{ "Speichern" if edit else "Hinzufügen" }}</button>
+      {% if edit %}<a class="button" href="{{ root }}/income">Abbrechen</a>{% endif %}
+    </div>
   </form>
-  <p class="hint">Wird für die Sparquote im Dashboard und für das
-    <a href="{{ root }}/income/dashboard">Einkommens-Dashboard</a> verwendet (Summe pro Monat). Sheet „Income“ im Excel.</p>
+  {% if edit %}
+  <form method="post" action="{{ root }}/income/{{ edit.id }}/delete" style="margin-top: 12px">
+    <button type="submit" class="small danger">Diesen Eintrag löschen</button>
+  </form>
+  {% else %}
+  <p class="hint">{% if items %}Vorgeschlagen: der Betrag des letzten Eintrags{% if suggestion[0] != items[0].date %} und das nächste Monatsende{% endif %}.
+    {% endif %}Wird für die Sparquote im Dashboard und für das Einkommens-Dashboard verwendet (Summe pro Monat). Sheet „Income“ im Excel.</p>
+  {% endif %}
 </div>
 {% if items %}
 <div class="table-wrap">
-<table>
-  <thead><tr><th>Datum</th><th>Nettogehalt</th><th>Jahressumme</th><th></th></tr></thead>
+<table class="income-table">
+  <thead><tr><th>Datum</th><th>Nettogehalt</th><th>Jahressumme</th><th><span class="sr-only">Aktion</span></th></tr></thead>
   <tbody>
   {% for item in items %}
     {% set first_of_year = loop.first or items[loop.index0 - 1].date.year != item.date.year %}
-    <tr>
+    <tr class="link{% if first_of_year and not loop.first %} year-start{% endif %}{% if edit and edit.id == item.id %} editing{% endif %}"
+        onclick="location.href='{{ root }}/income?edit={{ item.id }}#income-form'">
       <td>{{ item.date | date }}</td>
-      <td>
-        <form method="post" action="{{ root }}/income" class="actions" style="justify-content: flex-end">
-          <input type="hidden" name="id" value="{{ item.id }}">
-          <input type="hidden" name="date" value="{{ item.date.isoformat() }}">
-          <input class="number" name="amount" value="{{ '%.2f' | format(item.amount) | replace('.', ',') }}" style="width: 130px">
-          <button type="submit" class="small">Speichern</button>
-        </form>
-      </td>
-      <td>{% if first_of_year %}{{ years[item.date.year] | value }}{% endif %}</td>
-      <td><form method="post" action="{{ root }}/income/{{ item.id }}/delete" class="inline" onsubmit="return confirm('Löschen?')">
-        <button type="submit" class="small danger">Löschen</button></form></td>
+      <td>{{ item.amount | value }}</td>
+      <td>{% if first_of_year %}<span class="muted">{{ item.date.year }}:</span> {{ years[item.date.year] | value }}{% endif %}</td>
+      <td><a class="button small" href="{{ root }}/income?edit={{ item.id }}#income-form">Bearbeiten</a></td>
     </tr>
   {% endfor %}
   </tbody>

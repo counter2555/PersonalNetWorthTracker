@@ -2,24 +2,44 @@
 {% block title %}Einträge · Net Worth{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<div class="actions" style="margin-bottom: 12px">
-  <h1 style="margin: 0 auto 0 0">Einträge ({{ total }})</h1>
-  <a class="button" href="{{ root }}/entries/new">+ Neuer Eintrag</a>
+{% macro link() -%}
+  {{ root }}/entries?{{ dict(query, **kwargs) | urlencode }}
+{%- endmacro %}
+<div class="page-head">
+  <h1>Einträge ({{ all_entries }})</h1>
   <a class="button" href="{{ root }}/export.xlsx">Excel ⬇</a>
 </div>
+{% if all_entries %}
+<form method="get" action="{{ root }}/entries" class="filters actions">
+  <input type="hidden" name="per" value="{{ per }}">
+  <div class="segmented" role="group" aria-label="Spalten">
+    {% for key, label in views.items() %}
+      <a class="button{% if key == view %} selected{% endif %}" href="{{ link(view=key, page=1) }}"
+         {% if key == view %}aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </div>
+  <label class="check">Jahr
+    <select name="year" onchange="this.form.submit()" style="width: auto">
+      <option value="">Alle</option>
+      {% for y in years %}<option value="{{ y }}"{% if y == year %} selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+  </label>
+  <input type="hidden" name="view" value="{{ view }}">
+  <noscript><button type="submit" class="small">OK</button></noscript>
+</form>
+{% endif %}
 {% macro pager() %}
 <div class="pager actions">
-  {% set url = root ~ "/entries?per=" ~ per ~ "&page=" %}
   {% if page_no > 1 %}
-    <a class="button" href="{{ url }}1" title="Neueste Einträge">«</a>
-    <a class="button" href="{{ url }}{{ page_no - 1 }}" rel="prev">‹ Neuer</a>
+    <a class="button" href="{{ link(page=1) }}" title="Neueste Einträge">«</a>
+    <a class="button" href="{{ link(page=page_no - 1) }}" rel="prev">‹ Neuer</a>
   {% else %}
     <span class="button disabled">«</span><span class="button disabled">‹ Neuer</span>
   {% endif %}
   <span class="pager-info">{{ first }}–{{ first + rows | length - 1 }} von {{ total }} · Seite {{ page_no }} von {{ pages }}</span>
   {% if page_no < pages %}
-    <a class="button" href="{{ url }}{{ page_no + 1 }}" rel="next">Älter ›</a>
-    <a class="button" href="{{ url }}{{ pages }}" title="Älteste Einträge">»</a>
+    <a class="button" href="{{ link(page=page_no + 1) }}" rel="next">Älter ›</a>
+    <a class="button" href="{{ link(page=pages) }}" title="Älteste Einträge">»</a>
   {% else %}
     <span class="button disabled">Älter ›</span><span class="button disabled">»</span>
   {% endif %}
@@ -27,16 +47,22 @@
 {% endmacro %}
 {% if rows %}
 {% if pages > 1 %}{{ pager() }}{% endif %}
-<div class="table-wrap">
+<div class="table-wrap entries-table">
 <table>
   <thead><tr>
     <th>{{ DATE_COLUMN }}</th>
+    {% if total_column %}<th class="key" title="{{ total_column.formula }}">{{ total_column.name }}</th><th class="key">Änderung</th>{% endif %}
     {% for col in columns %}<th class="{{ 'text' if col.kind == 'text' }}" title="{{ col.formula }}">{{ col.name }}</th>{% endfor %}
   </tr></thead>
   <tbody>
   {% for row in rows %}
     <tr class="link" onclick="location.href='{{ root }}/entries/{{ row.entry_id }}'">
       <td><a href="{{ root }}/entries/{{ row.entry_id }}">{{ row.date | date }}</a></td>
+      {% if total_column %}
+        <td class="key">{{ row.values.get(total_column.name) | value }}</td>
+        {% set delta = deltas.get(row.entry_id) %}
+        <td class="key {{ 'up' if delta and delta > 0 else ('down' if delta and delta < 0) }}">{% if delta is not none %}{{ '+' if delta > 0 }}{{ delta | value }}{% endif %}</td>
+      {% endif %}
       {% for col in columns %}
         {% set fixed = col.name in row.overridden %}
         <td class="{{ 'text' if col.kind == 'text' }} {{ 'formula' if col.kind == 'formula' }} {{ 'fixed' if fixed }}"
@@ -47,20 +73,37 @@
   </tbody>
 </table>
 </div>
-<div class="actions" style="margin-top: 12px">
-  {% if pages > 1 %}{{ pager() }}{% endif %}
-  <form method="get" action="{{ root }}/entries" class="actions" style="margin-left: auto">
-    <label class="check">Pro Seite
-      <select name="per" onchange="this.form.submit()" style="width: auto">
-        {% for size in page_sizes %}<option value="{{ size }}"{% if size == per %} selected{% endif %}>{{ size }}</option>{% endfor %}
-        <option value="0"{% if per == 0 %} selected{% endif %}>Alle</option>
-      </select>
-    </label>
-    <noscript><button type="submit" class="small">OK</button></noscript>
-  </form>
-</div>
-<p class="hint">Grau = berechnet (Formel), kursiv = Festwert aus dem Import statt Formel. Klick auf eine Zeile zum Bearbeiten.</p>
+<ul class="entry-cards">
+  {% for row in rows %}
+  {% set delta = deltas.get(row.entry_id) %}
+  <li><a href="{{ root }}/entries/{{ row.entry_id }}">
+    <span class="card-date">{{ row.date | date }}</span>
+    {% if total_column %}<span class="card-total">{{ row.values.get(total_column.name) | value }}</span>{% endif %}
+    {% if delta is not none %}<span class="card-delta {{ 'up' if delta > 0 else ('down' if delta < 0) }}">{{ '+' if delta > 0 }}{{ delta | value }}</span>{% endif %}
+    {% if comment and row.values.get(comment.name) %}<span class="card-note">{{ row.values.get(comment.name) }}</span>{% endif %}
+  </a></li>
+  {% endfor %}
+</ul>
+{% if pages > 1 %}<div style="margin-top: 12px">{{ pager() }}</div>{% endif %}
+<form method="get" action="{{ root }}/entries" class="actions per-page">
+  <input type="hidden" name="view" value="{{ view }}">
+  {% if year %}<input type="hidden" name="year" value="{{ year }}">{% endif %}
+  <label class="check">Pro Seite
+    <select name="per" onchange="this.form.submit()" style="width: auto">
+      {% for size in page_sizes %}<option value="{{ size }}"{% if size == per %} selected{% endif %}>{{ size }}</option>{% endfor %}
+      <option value="0"{% if per == 0 %} selected{% endif %}>Alle</option>
+    </select>
+  </label>
+  <noscript><button type="submit" class="small">OK</button></noscript>
+</form>
+<p class="hint">Änderung = {{ total_column.name if total_column else 'Summe' }} minus Eintrag davor.
+  {% if view == 'alle' %}Grau = berechnet (Formel), kursiv = Festwert aus dem Import statt Formel.{% endif %}
+  Klick auf einen Eintrag zum Bearbeiten.</p>
+{% elif all_entries %}
+<div class="card"><p>Keine Einträge im Jahr {{ year }}.</p></div>
 {% else %}
-<div class="card"><p>Noch keine Einträge.</p></div>
+<div class="card"><p>Noch keine Einträge.</p>
+  <div class="actions"><a class="button primary" href="{{ root }}/entries/new">+ Ersten Eintrag anlegen</a>
+    <a class="button" href="{{ root }}/settings">Excel importieren</a></div></div>
 {% endif %}
 {% endblock %}

@@ -227,13 +227,13 @@ def test_entries_pagination(client, store, example_xlsx):
     login(client)
     with example_xlsx.open("rb") as f:
         client.post("/import", data={"confirm": "yes"}, files={"file": ("x.xlsx", f, "application/octet-stream")})
-    links = lambda text: re.findall(r'href="/entries/(\d+)"', text)  # noqa: E731
+    links = lambda text: list(dict.fromkeys(re.findall(r'href="/entries/(\d+)"', text)))  # noqa: E731  table + cards
     newest = [str(e.id) for e in reversed(store.entries())]
 
     first = client.get("/entries")  # 150 entries, 50 per page, newest first
     assert "Einträge (150)" in first.text and "1–50 von 150 · Seite 1 von 3" in first.text
     assert links(first.text) == newest[:50]
-    assert 'href="/entries?per=50&amp;page=2"' in first.text
+    assert 'href="/entries?per=50&amp;view=konten&amp;page=2"' in first.text
 
     last = client.get("/entries?page=3")
     assert links(last.text) == newest[100:] and "101–150 von 150" in last.text
@@ -253,7 +253,7 @@ def test_entry_form_sections_and_field_errors(client, store):
     login(client)
     page = client.get("/entries/new").text
     legends = re.findall(r"<legend>(.*?)</legend>", page)
-    assert legends == ["Konten", "Depot", "Vorsorge", "Anleihen"]
+    assert legends == ["Konten", "Depot", "Vorsorge", "Anleihen", "Notizen"]
     order = re.findall(r'<label>(.*?)\s*<input class="number"', page)
     assert order[:7] == ["Girokonto", "Kreditkarte", "Sparkonto", "Urlaubskonto", "Flatex Geld", "Flatex Depot",
                          "Depot Entwicklung"]  # credit card after its account, gain after the depot
@@ -279,3 +279,134 @@ def test_achievements(client, store, example_xlsx):
     assert len(titles) > 100 and "Phönix" in titles and "Fünf Jahresgehälter" in titles
     named = [t for t in titles if t != "Geheimes Achievement"]
     assert len(named) == len(set(named))
+
+
+def _import(client, example_xlsx):
+    with open(example_xlsx, "rb") as f:
+        client.post("/import", data={"confirm": "yes"}, files={"file": ("x.xlsx", f, "application/octet-stream")})
+
+
+def test_navigation_and_tab_bar(client):
+    login(client)
+    page = client.get("/entries").text
+    assert ">Excel ⬇</a>" in page  # on the page, no longer in the menu
+    menu = re.search(r'<nav aria-label="Hauptmenü">(.*?)</nav>', page, re.S).group(1)
+    assert "export.xlsx" not in menu and "Einstellungen" in menu
+    tabbar = re.search(r'<nav class="tabbar".*?</nav>', page, re.S).group(0)
+    assert 'href="/entries" class="tab active" aria-current="page"' in tabbar
+    assert 'href="/entries/new" class="tab tab-cta"' in tabbar and "Konten &amp; Kennzahlen" in tabbar
+    assert '<span class="brand">Einträge</span>' in page
+
+
+def test_entry_preview_and_duplicate_date(client, store):
+    login(client)
+    columns = {c.name: c.id for c in store.columns()}
+    giro, spar = f"c{columns['Girokonto']}", f"c{columns['Sparkonto']}"
+    client.post("/entries/new", data={"date": "2024-01-31", giro: "1000", spar: "500"})
+
+    preview = client.post("/entries/preview", data={"date": "2024-02-29", giro: "1000+250", spar: "500"}).json()
+    assert preview["fields"][giro] == {"value": 1250.0, "error": None}
+    assert preview["total"] == {"name": "Summe", "value": "1.750,00 €"}
+    assert preview["delta"] == {"value": "+250,00 €", "since": "31.01.2024"}
+    assert preview["duplicate"] is None and preview["values"]["Summe"] == "1.750,00 €"
+
+    bad = client.post("/entries/preview", data={"date": "2024-01-31", giro: "abc"}).json()
+    assert bad["fields"][giro]["error"] and bad["total"] is None and bad["duplicate"] == "31.01.2024"
+    entry_id = store.entries()[0].id  # editing an entry is no duplicate of itself
+    assert client.post("/entries/preview", data={"id": entry_id, "date": "2024-01-31", giro: "1"}).json()["duplicate"] is None
+
+    page = client.get("/entries/new").text
+    assert f'data-prev="1000.0"' in page and "vorher 1.000,00 €" in page
+
+    again = client.post("/entries/new", data={"date": "2024-01-31", giro: "1100"})
+    assert again.status_code == 422 and "Es gibt schon einen Eintrag vom 31.01.2024" in again.text
+    assert 'name="allow_duplicate"' in again.text and len(store.entries()) == 1
+    saved = client.post("/entries/new", data={"date": "2024-01-31", giro: "1100", "allow_duplicate": "yes"})
+    assert saved.status_code == 200 and len(store.entries()) == 2
+    assert "Summe 1.100,00 € (-400,00 € zum Eintrag davor)" in saved.text
+
+
+def test_delete_and_undo(client, store):
+    login(client)
+    columns = {c.name: c.id for c in store.columns()}
+    client.post("/entries/new", data={"date": "2024-01-31", f"c{columns['Girokonto']}": "1000+1",
+                                      f"c{columns['Kommentar']}": "Start"})
+    entry = store.entries()[0]
+    deleted = client.post(f"/entries/{entry.id}/delete")
+    assert "gelöscht" in deleted.text and 'action="/undo"' in deleted.text and not store.entries()
+    restored = client.post("/undo")
+    assert "wiederhergestellt" in restored.text
+    (back,) = store.entries()
+    assert back.date == entry.date and back.cells[columns["Girokonto"]].expr == "1000+1"
+    assert back.cells[columns["Kommentar"]].text == "Start"
+    assert "Nichts zum Wiederherstellen" in client.post("/undo").text
+
+    client.post("/income", data={"date": "2024-01-31", "amount": "2600"})
+    client.post(f"/income/{store.income()[0].id}/delete")
+    assert not store.income()
+    client.post("/undo")
+    assert [i.amount for i in store.income()] == [2600.0]
+
+
+def test_income_edit_suggestion_and_errors(client, store):
+    login(client)
+    client.post("/income", data={"date": "2024-01-31", "amount": "2.600,50"})
+    page = client.get("/income").text
+    assert 'value="2024-02-29"' in page and 'value="2600,50"' in page  # next month's end, last amount
+
+    item = store.income()[0]
+    edit = client.get(f"/income?edit={item.id}").text
+    assert "Nettogehalt vom 31.01.2024 bearbeiten" in edit and f'action="/income/{item.id}/delete"' in edit
+    client.post("/income", data={"id": item.id, "date": "2024-01-30", "amount": "2700"})
+    assert [(i.date.isoformat(), i.amount) for i in store.income()] == [("2024-01-30", 2700.0)]
+
+    bad = client.post("/income", data={"date": "2024-03-31", "amount": "zwei"})
+    assert bad.status_code == 422 and 'value="zwei"' in bad.text and 'id="err-amount"' in bad.text
+    assert len(store.income()) == 1
+
+
+def test_import_preview_and_confirm(client, store, example_xlsx):
+    login(client)
+    columns = {c.name: c.id for c in store.columns()}
+    client.post("/entries/new", data={"date": "2024-01-31", f"c{columns['Girokonto']}": "1000"})
+    with open(example_xlsx, "rb") as f:
+        preview = client.post("/import/preview", files={"file": ("mine.xlsx", f, "application/octet-stream")})
+    assert preview.status_code == 200 and "Import-Vorschau" in preview.text and "mine.xlsx" in preview.text
+    assert "<dt>Einträge</dt><dd>150</dd>" in preview.text and "<dt>Einträge</dt><dd>1</dd>" in preview.text
+    assert 'href="/export.xlsx"' in preview.text
+    assert len(store.entries()) == 1  # nothing changed yet
+    token = re.search(r'name="token" value="([^"]+)"', preview.text).group(1)
+
+    assert "bestätigen" in client.post("/import", data={"token": token}).text and len(store.entries()) == 1
+    done = client.post("/import", data={"token": token, "confirm": "yes"})
+    assert "150 Einträge importiert" in done.text and len(store.entries()) == 150
+    assert "abgelaufen" in client.post("/import", data={"token": token, "confirm": "yes"}).text
+
+    broken = client.post("/import/preview", files={"file": ("x.xlsx", b"kein excel", "application/octet-stream")})
+    assert "kann nicht importiert werden" in broken.text
+
+
+def test_entries_views_and_year_filter(client, store, example_xlsx):
+    login(client)
+    _import(client, example_xlsx)
+    header = lambda text: re.findall(r"<th[^>]*>([^<]*)</th>", text)  # noqa: E731
+    accounts = header(client.get("/entries").text)
+    assert accounts[:3] == ["Datum", "Summe", "Änderung"] and "Cash Rate" not in accounts
+    assert "Cash Rate" in header(client.get("/entries?view=alle").text)
+
+    years = sorted({e.date.year for e in store.entries()})
+    page = client.get(f"/entries?year={years[0]}").text
+    count = sum(e.date.year == years[0] for e in store.entries())
+    assert f"von {count} ·" in page or count <= 50
+    assert 'class="entry-cards"' in page
+
+
+def test_dashboard_reminder_and_kpi_details(client, store, example_xlsx):
+    login(client)
+    _import(client, example_xlsx)  # the example data ends long ago
+    page = client.get("/").text
+    assert 'class="notice"' in page and "Jetzt eintragen" in page
+    assert '<details class="kpi-how"><summary>Berechnung</summary>' in page
+    client.post("/settings", data={"target": "500000", "reminder_days": "0"})
+    assert 'class="notice"' not in client.get("/").text
+    assert "Nicht gespeichert" in client.post("/settings", data={"target": "1", "reminder_days": "x"}).text

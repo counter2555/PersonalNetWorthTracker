@@ -55,6 +55,7 @@ DEFAULT_SETTINGS = {
     "target": "1000000",
     "show_distribution": "1",
     "tax_rate": f"{DEFAULT_TAX_RATE:.10g}",
+    "reminder_days": "14",  # dashboard reminder when the last entry is older; 0 = off
 }
 
 
