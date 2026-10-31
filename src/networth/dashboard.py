@@ -664,13 +664,41 @@ TOOLBAR_CSS = f"""
 .theme-switch button:hover {{ color: var(--ink); }}
 .theme-switch button[aria-pressed="true"] {{ background: var(--grid); color: var(--ink); }}
 .theme-switch button:focus-visible {{ outline: 2px solid var(--accent); outline-offset: -2px; }}
+.toolbar .brand {{ display: none; }}
+.toolbar .tabbar {{ display: none; }}
 /* too narrow for one row: the menu gets its own row(s) below "new entry", account and theme switch */
 @media (max-width: 1360px) {{
   .toolbar nav {{ order: 1; flex-basis: 100%; }}
   .toolbar a.cta {{ margin-right: auto; }}
 }}
-/* phones: the wrapped bar would take too much of the screen when it stays on top */
-@media (max-width: 760px) {{ .toolbar {{ position: static; }} .toolbar .nav-sep {{ display: none; }} }}
+/* phones: a slim bar on top (page title, account, theme) and the menu as a tab bar at the bottom */
+@media (max-width: 760px) {{
+  :root {{ --tabbar-h: calc(58px + env(safe-area-inset-bottom, 0px)); }}
+  body:has(.tabbar) {{ padding-bottom: var(--tabbar-h); }}
+  .toolbar-inner {{ flex-wrap: nowrap; gap: 8px; padding: 6px 16px; }}
+  .toolbar .brand {{ display: block; margin-right: auto; font-weight: 600; color: var(--ink); overflow: hidden;
+                     text-overflow: ellipsis; white-space: nowrap; }}
+  .toolbar nav:not(.tabbar), .toolbar a.cta {{ display: none; }}
+  .toolbar .account {{ padding-left: 0; border-left: 0; }}
+  .toolbar .account a {{ display: none; }}
+  .toolbar .tabbar {{ position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; gap: 0;
+             grid-template-columns: repeat(5, 1fr); background: var(--surface); border-top: 1px solid var(--border);
+             padding: 4px 4px env(safe-area-inset-bottom, 0px); }}
+  .tabbar .tab, .tabbar .tab > summary {{ display: flex; flex-direction: column; align-items: center; justify-content: center;
+             gap: 1px; min-height: 50px; padding: 4px 2px; border-radius: 10px; font-size: 11px; line-height: 14px;
+             color: var(--ink-secondary); text-decoration: none; cursor: pointer; list-style: none; }}
+  .tabbar .tab > summary::-webkit-details-marker {{ display: none; }}
+  .tabbar details.tab {{ display: block; position: relative; padding: 0; margin: 0; min-height: 0; }}
+  .tab-icon {{ display: grid; place-items: center; height: 26px; }}
+  .tabbar .tab.active, .tabbar details.tab.active > summary {{ color: var(--accent); background: var(--accent-track); }}
+  .tabbar a.tab-cta .tab-icon {{ width: 44px; height: 28px; border-radius: 14px; background: var(--accent); color: #fff; }}
+  .tabbar a.tab-cta.active {{ background: none; }}
+  .more-menu {{ position: absolute; right: 0; bottom: calc(100% + 8px); min-width: 220px; display: grid; padding: 6px;
+                background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }}
+  .more-menu a {{ padding: 12px 14px; border-radius: 8px; font-size: 15px; color: var(--ink); text-decoration: none; }}
+  .more-menu a.active {{ background: var(--accent-track); }}
+}}
 """
 
 CSS = THEME_CSS + f"""
@@ -685,9 +713,19 @@ header {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1
 .kpi-value {{ font-size: clamp(22px, 1.5vw, 38px); font-weight: 600; margin: 4px 0; }}
 .hero .kpi-value {{ font-size: clamp(36px, 2.8vw, 76px); line-height: 1.1; }}
 .kpi-note {{ color: var(--ink-muted); font-size: clamp(12px, 0.7vw, 18px); }}
-.kpi-how {{ color: var(--ink-muted); font-size: clamp(11px, 0.65vw, 16px); margin-top: 8px; padding-top: 8px;
+.kpi-how {{ color: var(--ink-muted); font-size: clamp(11px, 0.65vw, 16px); margin-top: 8px; padding-top: 6px;
             border-top: 1px solid var(--grid); }}
-.kpi-how b {{ font-weight: 600; color: var(--ink-secondary); }}
+details.kpi-how {{ margin-top: 8px; }}
+.kpi-how > summary {{ font-size: clamp(11px, 0.65vw, 16px); color: var(--ink-muted); list-style: none; }}
+.kpi-how > summary::-webkit-details-marker {{ display: none; }}
+.kpi-how > summary::before {{ content: "ⓘ "; }}
+.kpi-how[open] > summary {{ margin-bottom: 4px; color: var(--ink-secondary); }}
+.notice {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 16px; padding: 10px 14px;
+           background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+           border-radius: 8px; color: var(--ink); font-size: 15px; }}
+.notice span {{ flex: 1 1 240px; }}
+.notice-action {{ background: var(--accent); color: #fff; border-radius: 8px; padding: 6px 14px; text-decoration: none;
+                  font-weight: 600; }}
 .progress {{ height: 8px; border-radius: 4px; background: var(--accent-track); margin: 8px 0 6px; overflow: hidden; }}
 .progress > div {{ height: 100%; border-radius: 4px; background: var(--accent); }}
 .grid {{ display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }}
@@ -765,6 +803,10 @@ function fontSize() {{
   return Math.round(Math.min(20, Math.max({BASE_FONT_SIZE}, window.innerWidth / 140)));
 }}
 
+function narrow() {{
+  return window.innerWidth < 640;
+}}
+
 function renderCharts() {{
   const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   for (const [id, specs] of Object.entries(FIGURES)) {{
@@ -772,6 +814,11 @@ function renderCharts() {{
     const spec = specs[theme];
     const layout = JSON.parse(JSON.stringify(spec.layout));
     layout.font.size = fontSize();
+    // phones: a legend above the plot collides with the range buttons, so it moves below
+    if (narrow() && layout.xaxis && layout.xaxis.rangeselector && layout.legend && layout.legend.yanchor !== "top") {{
+      layout.legend.y = -0.15;
+      layout.legend.yanchor = "top";
+    }}
     // keep a range the viewer picked (range buttons, zoom) when switching the theme
     const current = gd.layout && gd.layout.xaxis;
     if (current && current.autorange === false && current.range) {{
@@ -784,10 +831,15 @@ function renderCharts() {{
 {THEME_SWITCH_JS}
 renderCharts();
 
-let resizeTimer;
+let resizeTimer, wasNarrow = narrow();
 window.addEventListener("resize", () => {{
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {{
+    if (narrow() !== wasNarrow) {{  // legend position changes
+      wasNarrow = narrow();
+      renderCharts();
+      return;
+    }}
     const size = fontSize();
     document.querySelectorAll(".chart").forEach(gd => {{
       if (gd.layout && gd.layout.font.size !== size) Plotly.relayout(gd, {{"font.size": size}});
@@ -805,7 +857,7 @@ def _kpi(label: str, value: str, note: str, how: str, hero: bool = False, progre
     return (f'<div class="kpi{" hero" if hero else ""}"><div class="kpi-label">{html.escape(label)}</div>'
             f'<div class="kpi-value">{html.escape(value)}</div>{bar}'
             f'<div class="kpi-note">{html.escape(note)}</div>'
-            f'<div class="kpi-how"><b>Berechnung:</b> {html.escape(how)}</div></div>')
+            f'<details class="kpi-how"><summary>Berechnung</summary>{html.escape(how)}</details></div>')
 
 
 def _market_gain_text(data: Data) -> str:

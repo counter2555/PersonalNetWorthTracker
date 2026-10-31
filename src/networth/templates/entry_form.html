@@ -5,33 +5,54 @@
 {% if errors %}<div class="flash error">Bitte {{ errors | length }} {{ "Feld" if errors | length == 1 else "Felder" }} prüfen.</div>{% endif %}
 {% macro field_error(key) %}{% if key in errors %}<span class="field-error" id="err-{{ key }}">{{ errors[key] }}</span>{% endif %}{% endmacro %}
 {% macro invalid(key) %}{% if key in errors %} aria-invalid="true" aria-describedby="err-{{ key }}"{% endif %}{% endmacro %}
-<form method="post" action="{{ root }}/entries/{{ 'new' if is_new else entry.id }}" class="stack" id="entry-form">
+<form method="post" action="{{ root }}/entries/{{ 'new' if is_new else entry.id }}" class="stack" id="entry-form"
+      data-preview="{{ root }}/entries/preview">
+  {% if not is_new %}<input type="hidden" name="id" value="{{ entry.id }}">{% endif %}
   <div class="card">
     <div class="fields">
       <label>{{ DATE_COLUMN }} <input type="date" name="date" value="{{ raw.get('date', entry.date.isoformat()) }}" required{{ invalid('date') }}>
-        {{ field_error('date') }}</label>
+        {{ field_error('date') }}
+        <span class="field-warning" id="duplicate-hint" hidden></span></label>
     </div>
+    {% if duplicate %}
+    <label class="check confirm-duplicate"><input type="checkbox" name="allow_duplicate" value="yes">
+      Trotzdem speichern – zweiter Eintrag am selben Tag</label>
+    {% endif %}
     {% for section, cols in sections %}
     <fieldset class="section">
       <legend>{{ section }}</legend>
       <div class="fields">
       {% for col in cols %}
         {% set key = 'c' ~ col.id %}
+        {% set before = previous.cells.get(col.id) if previous else none %}
         <label>{{ col.name }}
-          <input class="number" name="{{ key }}" inputmode="text" autocomplete="off" enterkeyhint="next"
+          <input class="number" name="{{ key }}" inputmode="decimal" autocomplete="off" enterkeyhint="next"
+                 {% if before and before.value is not none %}data-prev="{{ before.value }}"{% endif %}
                  value="{{ raw[key] if key in raw else (entry.cells.get(col.id) | input) }}"{{ invalid(key) }}>
           {{ field_error(key) }}
+          {% if before and before.value is not none %}
+          <span class="field-prev" data-for="{{ key }}">vorher {{ before.value | value }}<span class="field-delta"></span></span>
+          {% endif %}
         </label>
       {% endfor %}
       </div>
     </fieldset>
     {% endfor %}
+    {% if text_columns %}
+    <fieldset class="section">
+      <legend>Notizen</legend>
+      <div class="fields wide-fields">
+      {% for col in text_columns %}
+        {% set key = 'c' ~ col.id %}
+        <label>{{ col.name }} <input name="{{ key }}" enterkeyhint="next"
+          {% if col.role == 'comment' %}placeholder="z. B. Gehaltserhöhung, Urlaub … (erscheint im Chart)"{% endif %}
+          value="{{ raw[key] if key in raw else (entry.cells.get(col.id).text if entry.cells.get(col.id) else '') or '' }}"></label>
+      {% endfor %}
+      </div>
+    </fieldset>
+    {% endif %}
     <p class="hint">Beträge mit Komma oder Punkt; Rechnungen wie <code>6604,12+895,2</code> sind erlaubt und bleiben im Excel als Formel erhalten.
-      {% if is_new %}Vorausgefüllt mit den Werten des letzten Eintrags.{% endif %}</p>
-    {% for col in columns if col.kind == 'text' %}
-      {% set key = 'c' ~ col.id %}
-      <label>{{ col.name }} <input name="{{ key }}" enterkeyhint="next" value="{{ raw[key] if key in raw else (entry.cells.get(col.id).text if entry.cells.get(col.id) else '') or '' }}"></label>
-    {% endfor %}
+      {% if is_new %}Vorausgefüllt mit den Werten des letzten Eintrags{% if previous %} vom {{ previous.date | date }}{% endif %}; geänderte Felder werden markiert.{% endif %}</p>
   </div>
 
   {% if fixed %}
@@ -44,26 +65,34 @@
   </div>
   {% endif %}
 
-  <div class="actions">
-    <button type="submit" class="primary">Speichern</button>
-    <a class="button" href="{{ root }}/entries">Abbrechen</a>
+  {% if columns | selectattr('kind', 'equalto', 'formula') | list %}
+  <details class="card computed-card"{% if computed %} open{% endif %}>
+    <summary>Berechnete Werte</summary>
+    <dl class="computed" id="computed">
+    {% for col in columns if col.kind == 'formula' %}
+      <dt>{{ col.name }}</dt><dd data-name="{{ col.name }}">{{ computed.values.get(col.name) | value(col.number_format) if computed else '' }}</dd>
+    {% endfor %}
+    </dl>
+  </details>
+  {% endif %}
+
+  <div class="form-bar">
+    <div class="keys" aria-label="Rechenzeichen einfügen">
+      <button type="button" data-key="+" tabindex="-1" aria-label="Plus einfügen">+</button>
+      <button type="button" data-key="-" tabindex="-1" aria-label="Minus einfügen">−</button>
+    </div>
+    <div class="live" id="live" aria-live="polite"></div>
+    <div class="actions">
+      <a class="button" href="{{ root }}/entries">Abbrechen</a>
+      <button type="submit" class="primary">Speichern</button>
+    </div>
   </div>
 </form>
 
-{% if computed %}
-<div class="card" style="margin-top: 16px">
-  <h2>Berechnete Werte</h2>
-  <dl class="computed">
-  {% for col in columns if col.kind == 'formula' %}
-    <dt>{{ col.name }}</dt><dd>{{ computed.values.get(col.name) | value(col.number_format) }}</dd>
-  {% endfor %}
-  </dl>
-</div>
-{% endif %}
-
 {% if not is_new %}
-<form method="post" action="{{ root }}/entries/{{ entry.id }}/delete" onsubmit="return confirm('Eintrag wirklich löschen?')">
+<form method="post" action="{{ root }}/entries/{{ entry.id }}/delete" style="margin-top: 16px">
   <button type="submit" class="danger">Eintrag löschen</button>
+  <span class="hint">Lässt sich danach noch rückgängig machen.</span>
 </form>
 {% endif %}
 {% endblock %}
@@ -72,18 +101,36 @@
 <script>
 (function () {
   const form = document.getElementById("entry-form");
+  const live = document.getElementById("live");
+  const numbers = Array.from(form.querySelectorAll("input.number"));
   const fields = () => Array.from(form.querySelectorAll("input:not([type=hidden]):not([type=checkbox])"))
     .filter(el => !el.disabled && el.offsetParent !== null);
+  const euro = value => value.toLocaleString("de-DE", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " €";
+
   // tapping an amount selects it, so typing replaces the prefilled value
   // (on click only once the pointer is released, which would otherwise drop the selection again);
   // a second tap places the cursor to append e.g. "+250"
-  form.querySelectorAll("input.number").forEach(el => {
+  numbers.forEach(el => {
     let tapped = false;
     const selectAll = () => el.setSelectionRange(0, el.value.length);
     el.addEventListener("pointerdown", () => { tapped = document.activeElement !== el; });
-    el.addEventListener("focus", () => { if (!tapped) selectAll(); });
+    el.addEventListener("focus", () => { if (!tapped) selectAll(); form.classList.add("typing-number"); });
+    el.addEventListener("blur", () => form.classList.remove("typing-number"));
     el.addEventListener("click", () => { if (tapped) selectAll(); tapped = false; });
   });
+
+  // number keyboards on phones have no "+" or "-": the bar offers them while an amount has the focus
+  form.querySelectorAll("[data-key]").forEach(button => {
+    button.addEventListener("pointerdown", event => event.preventDefault());  // keep the focus in the field
+    button.addEventListener("click", () => {
+      const el = document.activeElement;
+      if (!el || !el.classList.contains("number")) return;
+      const start = el.selectionStart ?? el.value.length, end = el.selectionEnd ?? el.value.length;
+      el.setRangeText(button.dataset.key, start, end, "end");
+      el.dispatchEvent(new Event("input", {bubbles: true}));
+    });
+  });
+
   // Enter moves to the next field; only the last one saves
   const list = fields();
   if (list.length) list[list.length - 1].setAttribute("enterkeyhint", "done");
@@ -94,6 +141,56 @@
     event.preventDefault();
     current[i + 1].focus();
   });
+
+  // live preview: total, change to the entry before, computed values, changed fields and a duplicate date
+  const duplicateHint = document.getElementById("duplicate-hint");
+  let timer = null, counter = 0;
+  async function preview() {
+    const ticket = ++counter;
+    let result;
+    try {
+      const response = await fetch(form.dataset.preview, {method: "POST", body: new FormData(form),
+                                                            headers: {accept: "application/json"}});
+      if (!response.ok) return;
+      result = await response.json();
+    } catch (e) { return; }
+    if (ticket !== counter) return;  // an older answer arriving late
+    for (const el of numbers) {
+      const field = result.fields[el.name] || {}, prev = el.dataset.prev;
+      const note = form.querySelector(`.field-prev[data-for="${el.name}"] .field-delta`);
+      const changed = prev !== undefined ? field.value !== null && field.value !== undefined
+          && Math.abs(field.value - Number(prev)) >= 0.005 : false;
+      el.classList.toggle("changed", changed);
+      el.classList.toggle("invalid-live", Boolean(field.error));
+      if (note) note.textContent = changed ? ` · ${field.value - Number(prev) > 0 ? "+" : ""}${euro(field.value - Number(prev))}`
+                                           : (field.error ? ` · ${field.error}` : "");
+    }
+    if (result.total) {
+      const part = (tag, text, css) => {
+        const el = document.createElement(tag);
+        el.textContent = text;
+        if (css) el.className = css;
+        return el;
+      };
+      const parts = [part("strong", `${result.total.name}: ${result.total.value}`)];
+      if (result.delta) {
+        const sign = result.delta.value.startsWith("+") ? "up" : (result.delta.value.startsWith("-") ? "down" : "");
+        parts.push(" ", part("span", result.delta.value, sign), " ", part("span", `seit ${result.delta.since}`, "muted"));
+      }
+      live.replaceChildren(...parts);
+    } else {
+      live.textContent = Object.values(result.fields).some(f => f.error) ? "Bitte Eingaben prüfen" : "";
+    }
+    for (const dd of form.querySelectorAll("#computed dd")) {
+      if (dd.dataset.name in result.values) dd.textContent = result.values[dd.dataset.name];
+    }
+    duplicateHint.hidden = !result.duplicate;
+    duplicateHint.textContent = result.duplicate ? `Es gibt schon einen Eintrag vom ${result.duplicate}.` : "";
+  }
+  form.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(preview, 250); });
+  form.addEventListener("change", () => { clearTimeout(timer); timer = setTimeout(preview, 50); });
+  preview();
+
   const invalid = form.querySelector("[aria-invalid=true]");
   if (invalid) invalid.focus();
 })();

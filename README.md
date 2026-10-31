@@ -3,7 +3,9 @@
 Self-hosted Service (Docker) zum Erfassen des Vermögens von überall – mit Excel-Export im Format der bisherigen
 `NetWorth.xlsx` und dem interaktiven Plotly-Dashboard.
 
-* **Einträge** im Browser anlegen/bearbeiten (auch am Handy), vorausgefüllt mit dem letzten Stand.
+* **Einträge** im Browser anlegen/bearbeiten (auch am Handy), vorausgefüllt mit dem letzten Stand. Beim Tippen
+  zeigt eine Leiste die neue Summe und die Änderung zum letzten Eintrag, jedes Feld seinen Vorwert; doppelte Daten
+  werden erkannt, gelöschte Einträge lassen sich rückgängig machen. Am Handy gibt es eine Tab-Leiste unten.
   Rechnungen wie `6604,12+895,2` sind erlaubt und bleiben im Excel als Formel erhalten.
 * **Dashboard** wie bisher (Kennzahlen, Vermögensentwicklung, Zuwachs, Verteilung, Depot, Hochrechnung),
   zusätzlich als eigenständige HTML-Datei herunterladbar.
@@ -12,7 +14,8 @@ Self-hosted Service (Docker) zum Erfassen des Vermögens von überall – mit Ex
 * **Erfolge**: Achievements im Stil von Spiele-Plattformen zu Vermögen, Börse, Disziplin, Einkommen und Sparquote –
   mit Stufen (Bronze bis Platin), Punkten, Fortschrittsbalken, geheimen und negativen „Schande“-Achievements.
 * **Excel-Export** jederzeit: Sheet „Net Worth“ mit Formeln, Formaten und bedingter Formatierung, Sheet „Income“.
-* **Excel-Import** der bestehenden Datei (Einstellungen → Excel importieren oder `networth import`).
+* **Excel-Import** der bestehenden Datei (Einstellungen → Excel importieren oder `networth import`) mit Vorschau
+  vor dem Ersetzen und Download einer Sicherung des aktuellen Stands.
 * **Konten & Kennzahlen** statt Spalten-Konfiguration: Konten in Gruppen anlegen und per Drag & Drop sortieren,
   die Summe rechnet automatisch, Kennzahlen aus einem Katalog oder als eigene Formel.
 * **Mehrbenutzerfähig**: Registrierung mit Benutzername und Passwort, jedes Konto hat eigene, getrennte Daten
